@@ -1,8 +1,13 @@
 """
-OT Control Management — Comprehensive Processor
-Reads Excel/CSV from /data/, outputs full JSON for the dashboard.
-Supports: daily, weekly, monthly, quarterly, yearly views + forecasting.
+OT Control Management — Processor (v2)
+Reads attendance Excel/CSV from /data/, aggregates weekly hours,
+outputs docs/data/ot_data.json for the GitHub Pages dashboard.
+
+Supports real attendance file format:
+  Date | Employee ID | Emp. Name | Designation | Floor | Units | Shift |
+  OT | In Time | Out Time | Department | Section | Team | Line | Gender
 """
+
 import os, json, glob, re
 from datetime import date, datetime, timedelta
 from collections import defaultdict
@@ -25,13 +30,63 @@ def classify(h):
         if lo <= h < hi: return name
     return "exceeded"
 
+def risk_order(name):
+    m = {"exceeded":5,"critical":4,"warning":3,"caution":2,"safe":1}
+    return m.get(name, 0)
+
 def week_start(d):
     return d - timedelta(days=d.weekday())
 
 def quarter_of(d):
     return f"{d.year}-Q{(d.month-1)//3+1}"
 
-# ── Load All Files ──────────────────────────────────────────────
+def parse_time_hours(t_str):
+    """Parse HH:MM or HH:MM:SS string → decimal hours."""
+    if pd.isna(t_str): return None
+    s = str(t_str).strip()
+    for fmt in ("%H:%M:%S", "%H:%M"):
+        try:
+            t = datetime.strptime(s, fmt)
+            return t.hour + t.minute/60 + t.second/3600
+        except: pass
+    return None
+
+def calc_worked_hours(in_h, out_h):
+    """Calculate total hours worked from decimal hour values."""
+    if in_h is None or out_h is None: return None
+    diff = out_h - in_h
+    if diff < 0: diff += 24   # overnight shift
+    return round(diff, 2)
+
+# ── Column name mapping (handles variations) ─────────────────────────────
+COL_ALIASES = {
+    "date":        ["date"],
+    "emp_id":      ["employee id","emp id","empid","employee_id","emp_no","id no"],
+    "emp_name":    ["emp. name","emp name","employee name","name","full name","emp_name"],
+    "designation": ["designation","title","job title","position"],
+    "floor":       ["floor","building","location"],
+    "unit":        ["units","unit","factory","plant"],
+    "shift":       ["shift","shift code","shift_code"],
+    "ot_hours":    ["ot","ot hours","overtime","overtime hours","ot_hours"],
+    "in_time":     ["in time","in_time","time in","entry time","punch in"],
+    "out_time":    ["out time","out_time","time out","exit time","punch out"],
+    "department":  ["department","dept","division"],
+    "section":     ["section","sub dept","sub-department"],
+    "team":        ["team","group","work group"],
+    "line":        ["line","production line","line no"],
+    "gender":      ["gender","sex"],
+}
+
+def find_col(cols, candidates):
+    for c in candidates:
+        for dc in cols:
+            if dc.strip().lower() == c: return dc
+        # partial match fallback
+        for dc in cols:
+            if c in dc.strip().lower(): return dc
+    return None
+
+# ── Load all files ──────────────────────────────────────────────────────
 def load_all():
     patterns = [
         os.path.join(DATA_DIR, "*.xlsx"),
@@ -43,7 +98,7 @@ def load_all():
         files.extend(sorted(glob.glob(p)))
 
     if not files:
-        print("  No data files found.")
+        print("  No data files found in /data/")
         return pd.DataFrame()
 
     frames = []
@@ -51,116 +106,170 @@ def load_all():
         try:
             ext = fpath.lower().split(".")[-1]
             if ext in ("xlsx", "xls"):
-                df = pd.read_excel(fpath, header=1, dtype=str)
+                # Try all sheets, use first non-empty one
+                xl = pd.ExcelFile(fpath)
+                for sheet in xl.sheet_names:
+                    df = pd.read_excel(fpath, sheet_name=sheet, dtype=str)
+                    if len(df) > 0:
+                        df["_src"] = os.path.basename(fpath)
+                        df["_sheet"] = sheet
+                        frames.append(df)
+                        print(f"  Loaded {len(df):>5} rows — {os.path.basename(fpath)} [{sheet}]")
+                        break  # one sheet per file
             else:
                 df = pd.read_csv(fpath, dtype=str, encoding="utf-8-sig")
-
-            df.columns = [
-                re.sub(r'[\n\r]+', ' ', str(c)).strip().lower()
-                .replace(' ', '_').replace('(','').replace(')','')
-                for c in df.columns
-            ]
-            df["_src"] = os.path.basename(fpath)
-            frames.append(df)
-            print(f"  Loaded {len(df):>5} rows — {os.path.basename(fpath)}")
+                df["_src"] = os.path.basename(fpath)
+                df["_sheet"] = "csv"
+                frames.append(df)
+                print(f"  Loaded {len(df):>5} rows — {os.path.basename(fpath)}")
         except Exception as e:
             print(f"  SKIP {os.path.basename(fpath)}: {e}")
 
-    if not frames:
-        return pd.DataFrame()
+    if not frames: return pd.DataFrame()
     return pd.concat(frames, ignore_index=True)
 
-# ── Normalise Columns ───────────────────────────────────────────
-COL_ALIASES = {
-    "date":           ["date"],
-    "emp_id":         ["employee_id","emp_id","id","empid","employee_no"],
-    "emp_name":       ["employee_name","name","full_name","emp_name"],
-    "department":     ["department","dept","division"],
-    "line":           ["production_line","line","prod_line"],
-    "section":        ["section","area","unit"],
-    "regular_hours":  ["regular_hours","regular","reg_hours","reg"],
-    "ot_hours":       ["ot_hours","ot","overtime","overtime_hours"],
-    "total_hours":    ["total_hours","total"],
-}
-
-def resolve_col(df_cols, candidates):
-    for c in candidates:
-        for dc in df_cols:
-            if dc == c or dc.startswith(c): return dc
-    return None
-
-def normalise(df):
+# ── Normalise ────────────────────────────────────────────────────────────
+def normalise(raw):
     col_map = {}
-    for std, cands in COL_ALIASES.items():
-        found = resolve_col(df.columns.tolist(), cands)
-        if found: col_map[found] = std
-    df = df.rename(columns=col_map)
+    raw_cols = raw.columns.tolist()
+    for std_key, cands in COL_ALIASES.items():
+        found = find_col(raw_cols, cands)
+        if found: col_map[found] = std_key
 
-    required = ["date", "emp_id", "ot_hours"]
-    missing  = [c for c in required if c not in df.columns]
-    if missing:
-        print(f"  WARNING: Missing columns {missing} — skipping file block")
-        return pd.DataFrame()
+    df = raw.rename(columns=col_map).copy()
 
+    # Require at minimum: date, emp_id, ot_hours
+    for req in ["date","emp_id","ot_hours"]:
+        if req not in df.columns:
+            print(f"  WARNING: Required column '{req}' not found. Skipping block.")
+            return pd.DataFrame()
+
+    # Parse dates
     df["date"] = pd.to_datetime(df["date"], errors="coerce", dayfirst=False).dt.date
-    df = df[df["date"].notna() & df["emp_id"].notna()]
-    df = df[df["emp_id"].astype(str).str.strip() != ""]
+    df = df[df["date"].notna()]
 
-    df["ot_hours"]      = pd.to_numeric(df.get("ot_hours",     0), errors="coerce").fillna(0)
-    df["regular_hours"] = pd.to_numeric(df.get("regular_hours", 8), errors="coerce").fillna(8)
-    df["total_hours"]   = df["regular_hours"] + df["ot_hours"]
+    # Parse OT
+    df["ot_hours"] = pd.to_numeric(df["ot_hours"], errors="coerce").fillna(0).clip(lower=0)
 
-    for col in ["emp_name","department","line","section"]:
+    # Calculate worked hours from in/out times
+    if "in_time" in df.columns and "out_time" in df.columns:
+        df["_in_h"]  = df["in_time"].apply(parse_time_hours)
+        df["_out_h"] = df["out_time"].apply(parse_time_hours)
+        df["worked_hours"] = df.apply(
+            lambda r: calc_worked_hours(r["_in_h"], r["_out_h"]), axis=1
+        )
+        # Regular = worked - OT (floor at 0)
+        df["regular_hours"] = (df["worked_hours"] - df["ot_hours"]).clip(lower=0)
+        df["total_hours"]   = df["worked_hours"]
+        df.drop(columns=["_in_h","_out_h"], inplace=True)
+    else:
+        # Fallback: assume 9h regular
+        df["regular_hours"] = 9.0
+        df["total_hours"]   = df["regular_hours"] + df["ot_hours"]
+        df["worked_hours"]  = df["total_hours"]
+
+    # Fill optional string columns
+    for col in ["emp_name","designation","floor","unit","shift",
+                "department","section","team","line","gender"]:
         if col not in df.columns: df[col] = ""
         df[col] = df[col].fillna("").astype(str).str.strip()
 
-    df["emp_id"] = df["emp_id"].astype(str).str.strip()
-    df["week"]   = df["date"].apply(week_start)
-    df["month"]  = df["date"].apply(lambda d: d.strftime("%Y-%m"))
-    df["quarter"]= df["date"].apply(quarter_of)
-    df["year"]   = df["date"].apply(lambda d: str(d.year))
+    df["emp_id"] = df["emp_id"].fillna("").astype(str).str.strip()
+    df = df[df["emp_id"] != ""]
 
+    # Derived time fields
+    df["week"]    = df["date"].apply(week_start)
+    df["month"]   = df["date"].apply(lambda d: d.strftime("%Y-%m"))
+    df["quarter"] = df["date"].apply(quarter_of)
+    df["year"]    = df["date"].apply(lambda d: str(d.year))
+
+    print(f"\n  Valid records: {len(df):,}")
+    print(f"  Employees:     {df['emp_id'].nunique():,}")
+    print(f"  Date range:    {df['date'].min()} → {df['date'].max()}")
     return df
 
-# ── Employee info lookup ────────────────────────────────────────
+# ── Employee info helper ─────────────────────────────────────────────────
 def emp_info(grp):
-    last = grp.iloc[-1]
+    r = grp.iloc[-1]
     return {
-        "emp_id":     str(last["emp_id"]),
-        "emp_name":   str(last.get("emp_name","")),
-        "department": str(last.get("department","")),
-        "line":       str(last.get("line","")),
-        "section":    str(last.get("section","")),
+        "emp_id":      str(r["emp_id"]),
+        "emp_name":    str(r.get("emp_name","")),
+        "designation": str(r.get("designation","")),
+        "floor":       str(r.get("floor","")),
+        "unit":        str(r.get("unit","")),
+        "department":  str(r.get("department","")),
+        "section":     str(r.get("section","")),
+        "team":        str(r.get("team","")),
+        "line":        str(r.get("line","")),
+        "gender":      str(r.get("gender","")),
+        "shift":       str(r.get("shift","")),
     }
 
-# ── DAILY aggregation ───────────────────────────────────────────
+# ── Group-by helper ──────────────────────────────────────────────────────
+def group_by(emps, field):
+    groups = defaultdict(lambda: {
+        "total_hours":0,"ot_hours":0,"employees":0,
+        "risk_counts":defaultdict(int)
+    })
+    for e in emps:
+        key = e.get(field) or "—"
+        g   = groups[key]
+        g["total_hours"] += e.get("total_hours", 0)
+        g["ot_hours"]    += e.get("ot_hours", 0)
+        g["employees"]   += 1
+        g["risk_counts"][e.get("risk_level","safe")] += 1
+    result = {}
+    for name, g in sorted(groups.items()):
+        result[name] = {
+            "avg_hours": round(g["total_hours"] / g["employees"], 1),
+            "avg_ot":    round(g["ot_hours"]    / g["employees"], 1),
+            "employees": g["employees"],
+            "risk_counts": dict(g["risk_counts"]),
+        }
+    return result
+
+def gender_split(emps):
+    counts = defaultdict(lambda: {"employees":0,"avg_ot":0,"total_ot":0})
+    for e in emps:
+        g = e.get("gender","Unknown") or "Unknown"
+        counts[g]["employees"]  += 1
+        counts[g]["total_ot"]   += e.get("ot_hours",0)
+    result = {}
+    for k,v in counts.items():
+        result[k] = {
+            "employees": v["employees"],
+            "avg_ot":    round(v["total_ot"]/v["employees"],1) if v["employees"] else 0,
+        }
+    return result
+
+# ── DAILY ────────────────────────────────────────────────────────────────
 def build_daily(df):
     daily = {}
     for d, dg in df.groupby("date"):
         emps = []
         for eid, eg in dg.groupby("emp_id"):
-            info   = emp_info(eg)
-            ot_h   = round(float(eg["ot_hours"].sum()), 1)
-            reg_h  = round(float(eg["regular_hours"].sum()), 1)
-            tot_h  = round(float(eg["total_hours"].sum()), 1)
-            emps.append({**info, "ot_hours": ot_h, "regular_hours": reg_h, "total_hours": tot_h})
-
-        emps.sort(key=lambda e: e["ot_hours"], reverse=True)
+            info  = emp_info(eg)
+            ot_h  = round(float(eg["ot_hours"].sum()), 1)
+            tot_h = round(float(eg["total_hours"].sum()), 1)
+            emps.append({**info, "ot_hours": ot_h, "total_hours": tot_h})
+        emps.sort(key=lambda e: -e["ot_hours"])
         total_ot = round(sum(e["ot_hours"] for e in emps), 1)
-        avg_ot   = round(total_ot / len(emps), 1) if emps else 0
-
         daily[str(d)] = {
             "date":       str(d),
             "day_name":   d.strftime("%A"),
             "employees":  len(emps),
             "total_ot":   total_ot,
-            "avg_ot":     avg_ot,
+            "avg_ot":     round(total_ot/len(emps),1) if emps else 0,
             "top10":      emps[:10],
             "all":        emps,
+            "by_unit":    group_by(emps,"unit"),
+            "by_floor":   group_by(emps,"floor"),
+            "by_dept":    group_by(emps,"department"),
+            "gender":     gender_split(emps),
         }
     return daily
 
-# ── WEEKLY aggregation ──────────────────────────────────────────
+# ── WEEKLY ───────────────────────────────────────────────────────────────
 def build_weekly(df):
     weekly = {}
     for ws, wg in df.groupby("week"):
@@ -174,59 +283,56 @@ def build_weekly(df):
             remaining = round(max(0, WEEKLY_LIMIT - tot_h), 1)
             proj      = round(tot_h / days_w * 6, 1) if days_w else tot_h
             risk      = classify(tot_h)
+            # Daily breakdown
+            daily = {}
+            for _, row in eg.iterrows():
+                k = str(row["date"])
+                daily[k] = {
+                    "ot":    round(float(row["ot_hours"]),1),
+                    "total": round(float(row["total_hours"]),1),
+                    "in":    str(row.get("in_time","")),
+                    "out":   str(row.get("out_time","")),
+                    "shift": str(row.get("shift","")),
+                }
             emp_map[eid] = {
                 **info,
                 "days_worked":     days_w,
-                "ot_hours":        ot_h,
                 "regular_hours":   reg_h,
+                "ot_hours":        ot_h,
                 "total_hours":     tot_h,
                 "remaining_hours": remaining,
                 "projected_hours": proj,
                 "risk_level":      risk,
+                "daily":           daily,
             }
 
-        emps = sorted(emp_map.values(), key=lambda e: -(RISK_CFG_ORDER(e["risk_level"])*1000 + e["total_hours"]))
-        rc   = defaultdict(int)
+        emps = sorted(emp_map.values(),
+                      key=lambda e: -(risk_order(e["risk_level"])*1000 + e["total_hours"]))
+        rc = defaultdict(int)
         for e in emps: rc[e["risk_level"]] += 1
-        total_emps = len(emps)
-        avg_h = round(sum(e["total_hours"] for e in emps)/total_emps, 1) if total_emps else 0
+        n     = len(emps)
+        avg_h = round(sum(e["total_hours"] for e in emps)/n, 1) if n else 0
 
+        curr = date.today() - timedelta(days=date.today().weekday())
         weekly[str(ws)] = {
-            "week_start":    str(ws),
-            "week_end":      str(ws + timedelta(days=6)),
-            "total_employees": total_emps,
-            "avg_hours":     avg_h,
-            "risk_counts":   dict(rc),
-            "by_line":       group_by(emps, "line"),
-            "by_section":    group_by(emps, "section"),
-            "by_department": group_by(emps, "department"),
-            "employees":     emps,
+            "week_start":      str(ws),
+            "week_end":        str(ws + timedelta(days=6)),
+            "is_current":      ws == curr,
+            "total_employees": n,
+            "avg_hours":       avg_h,
+            "risk_counts":     dict(rc),
+            "by_line":         group_by(emps,"line"),
+            "by_section":      group_by(emps,"section"),
+            "by_department":   group_by(emps,"department"),
+            "by_unit":         group_by(emps,"unit"),
+            "by_floor":        group_by(emps,"floor"),
+            "by_team":         group_by(emps,"team"),
+            "gender":          gender_split(emps),
+            "employees":       emps,
         }
     return weekly
 
-def RISK_CFG_ORDER(name):
-    m = {"exceeded":5,"critical":4,"warning":3,"caution":2,"safe":1}
-    return m.get(name, 0)
-
-def group_by(emps, field):
-    groups = defaultdict(lambda: {"total_hours":0,"ot_hours":0,"employees":0,"risk_counts":defaultdict(int)})
-    for e in emps:
-        g = groups[e.get(field) or "—"]
-        g["total_hours"] += e["total_hours"]
-        g["ot_hours"]    += e["ot_hours"]
-        g["employees"]   += 1
-        g["risk_counts"][e.get("risk_level","safe")] += 1
-    result = {}
-    for name, g in sorted(groups.items()):
-        result[name] = {
-            "avg_hours":   round(g["total_hours"]/g["employees"], 1),
-            "avg_ot":      round(g["ot_hours"]/g["employees"], 1),
-            "employees":   g["employees"],
-            "risk_counts": dict(g["risk_counts"]),
-        }
-    return result
-
-# ── MONTHLY aggregation ─────────────────────────────────────────
+# ── MONTHLY ──────────────────────────────────────────────────────────────
 def build_monthly(df):
     monthly = {}
     for m, mg in df.groupby("month"):
@@ -234,52 +340,43 @@ def build_monthly(df):
         for eid, eg in mg.groupby("emp_id"):
             info  = emp_info(eg)
             ot_h  = round(float(eg["ot_hours"].sum()), 1)
-            reg_h = round(float(eg["regular_hours"].sum()), 1)
             tot_h = round(float(eg["total_hours"].sum()), 1)
             days  = int(eg["date"].nunique())
-            emp_map[eid] = {**info, "ot_hours": ot_h, "regular_hours": reg_h, "total_hours": tot_h, "days_worked": days}
+            emp_map[eid] = {**info, "ot_hours":ot_h,"total_hours":tot_h,"days_worked":days}
 
         emps       = sorted(emp_map.values(), key=lambda e: -e["ot_hours"])
-        total_emps = len(emps)
+        n          = len(emps)
         total_ot   = round(sum(e["ot_hours"] for e in emps), 1)
-        avg_ot     = round(total_ot / total_emps, 1) if total_emps else 0
+        avg_ot     = round(total_ot/n, 1) if n else 0
 
-        # Daily OT trend for chart
         daily_trend = []
         for d, dg in mg.groupby("date"):
             daily_trend.append({
-                "date":    str(d),
-                "avg_ot":  round(float(dg["ot_hours"].mean()), 2),
-                "total_ot":round(float(dg["ot_hours"].sum()), 1),
+                "date":     str(d),
+                "avg_ot":   round(float(dg["ot_hours"].mean()), 2),
+                "total_ot": round(float(dg["ot_hours"].sum()), 1),
             })
 
-        # Week-level summaries within this month
-        weeks_in_month = []
-        for ws, wg in mg.groupby("week"):
-            exceeded = sum(1 for eid, eg in wg.groupby("emp_id") if eg["total_hours"].sum() >= WEEKLY_LIMIT)
-            weeks_in_month.append({"week_start": str(ws), "exceeded": exceeded})
-
-        try:
-            dt = datetime.strptime(m, "%Y-%m")
-            label = dt.strftime("%B %Y")
-        except:
-            label = m
+        try:    label = datetime.strptime(m, "%Y-%m").strftime("%B %Y")
+        except: label = m
 
         monthly[m] = {
-            "month":       m,
-            "label":       label,
-            "total_employees": total_emps,
-            "total_ot":    total_ot,
-            "avg_ot":      avg_ot,
-            "top10":       emps[:10],
-            "by_line":     group_by(emps, "line"),
-            "by_department": group_by(emps, "department"),
-            "daily_trend": daily_trend,
-            "weeks":       weeks_in_month,
+            "month":           m,
+            "label":           label,
+            "total_employees": n,
+            "total_ot":        total_ot,
+            "avg_ot":          avg_ot,
+            "top10":           emps[:10],
+            "by_unit":         group_by(emps,"unit"),
+            "by_floor":        group_by(emps,"floor"),
+            "by_department":   group_by(emps,"department"),
+            "by_line":         group_by(emps,"line"),
+            "gender":          gender_split(emps),
+            "daily_trend":     daily_trend,
         }
     return monthly
 
-# ── QUARTERLY aggregation ───────────────────────────────────────
+# ── QUARTERLY ────────────────────────────────────────────────────────────
 def build_quarterly(df):
     quarterly = {}
     for q, qg in df.groupby("quarter"):
@@ -288,35 +385,31 @@ def build_quarterly(df):
             info  = emp_info(eg)
             ot_h  = round(float(eg["ot_hours"].sum()), 1)
             tot_h = round(float(eg["total_hours"].sum()), 1)
-            days  = int(eg["date"].nunique())
-            emp_map[eid] = {**info, "ot_hours": ot_h, "total_hours": tot_h, "days_worked": days}
+            emp_map[eid] = {**info,"ot_hours":ot_h,"total_hours":tot_h}
 
-        emps       = sorted(emp_map.values(), key=lambda e: -e["ot_hours"])
-        total_emps = len(emps)
-        total_ot   = round(sum(e["ot_hours"] for e in emps), 1)
-        avg_ot     = round(total_ot / total_emps, 1) if total_emps else 0
-
-        # Monthly trend within quarter
+        emps     = sorted(emp_map.values(), key=lambda e: -e["ot_hours"])
+        n        = len(emps)
+        total_ot = round(sum(e["ot_hours"] for e in emps), 1)
         month_trend = []
-        for m, mg in qg.groupby("month"):
+        for mo, mg in qg.groupby("month"):
             month_trend.append({
-                "month":    m,
+                "month":    mo,
                 "avg_ot":   round(float(mg["ot_hours"].mean()), 2),
                 "total_ot": round(float(mg["ot_hours"].sum()), 1),
             })
-
         quarterly[q] = {
-            "quarter":    q,
-            "total_employees": total_emps,
-            "total_ot":   total_ot,
-            "avg_ot":     avg_ot,
-            "top10":      emps[:10],
-            "by_line":    group_by(emps, "line"),
-            "month_trend": month_trend,
+            "quarter":         q,
+            "total_employees": n,
+            "total_ot":        total_ot,
+            "avg_ot":          round(total_ot/n,1) if n else 0,
+            "top10":           emps[:10],
+            "by_unit":         group_by(emps,"unit"),
+            "by_floor":        group_by(emps,"floor"),
+            "month_trend":     month_trend,
         }
     return quarterly
 
-# ── YEARLY aggregation ──────────────────────────────────────────
+# ── YEARLY ───────────────────────────────────────────────────────────────
 def build_yearly(df):
     yearly = {}
     for y, yg in df.groupby("year"):
@@ -324,228 +417,160 @@ def build_yearly(df):
         for eid, eg in yg.groupby("emp_id"):
             info  = emp_info(eg)
             ot_h  = round(float(eg["ot_hours"].sum()), 1)
-            tot_h = round(float(eg["total_hours"].sum()), 1)
-            emp_map[eid] = {**info, "ot_hours": ot_h, "total_hours": tot_h}
+            emp_map[eid] = {**info,"ot_hours":ot_h}
 
-        emps       = sorted(emp_map.values(), key=lambda e: -e["ot_hours"])
-        total_emps = len(emps)
-        total_ot   = round(sum(e["ot_hours"] for e in emps), 1)
-        avg_ot     = round(total_ot / total_emps, 1) if total_emps else 0
-
-        # Monthly trend within year
+        emps     = sorted(emp_map.values(), key=lambda e: -e["ot_hours"])
+        n        = len(emps)
+        total_ot = round(sum(e["ot_hours"] for e in emps), 1)
         month_trend = []
-        for m, mg in yg.groupby("month"):
-            try: label = datetime.strptime(m, "%Y-%m").strftime("%b")
-            except: label = m
+        for mo, mg in yg.groupby("month"):
+            try: lbl = datetime.strptime(mo, "%Y-%m").strftime("%b")
+            except: lbl = mo
             month_trend.append({
-                "month": m, "label": label,
-                "avg_ot":   round(float(mg["ot_hours"].mean()), 2),
-                "total_ot": round(float(mg["ot_hours"].sum()), 1),
+                "month": mo, "label": lbl,
+                "avg_ot":   round(float(mg["ot_hours"].mean()),2),
+                "total_ot": round(float(mg["ot_hours"].sum()),1),
             })
-
         quarterly_trend = []
-        for q, qg in yg.groupby("quarter"):
+        for q, qg2 in yg.groupby("quarter"):
             quarterly_trend.append({
                 "quarter":  q,
-                "avg_ot":   round(float(qg["ot_hours"].mean()), 2),
-                "total_ot": round(float(qg["ot_hours"].sum()), 1),
+                "avg_ot":   round(float(qg2["ot_hours"].mean()),2),
+                "total_ot": round(float(qg2["ot_hours"].sum()),1),
             })
-
         yearly[y] = {
-            "year":       y,
-            "total_employees": total_emps,
-            "total_ot":   total_ot,
-            "avg_ot":     avg_ot,
-            "top10":      emps[:10],
-            "by_line":    group_by(emps, "line"),
+            "year":            y,
+            "total_employees": n,
+            "total_ot":        total_ot,
+            "avg_ot":          round(total_ot/n,1) if n else 0,
+            "top10":           emps[:10],
+            "by_unit":         group_by(emps,"unit"),
+            "by_floor":        group_by(emps,"floor"),
+            "gender":          gender_split(emps),
             "month_trend":     month_trend,
             "quarterly_trend": quarterly_trend,
         }
     return yearly
 
-# ── FORECAST: who will exceed 72h this week? ────────────────────
+# ── FORECAST ────────────────────────────────────────────────────────────
 def build_forecast(df):
-    today      = date.today()
-    curr_week  = week_start(today)
-    week_df    = df[df["week"] == curr_week]
-
+    today     = date.today()
+    curr_week = week_start(today)
+    week_df   = df[df["week"] == curr_week]
     if week_df.empty:
         # Use latest available week
-        latest = df["week"].max()
-        week_df = df[df["week"] == latest]
-        curr_week = latest
+        curr_week = df["week"].max()
+        week_df   = df[df["week"] == curr_week]
 
-    days_worked_so_far = (today - curr_week).days + 1
-    days_remaining     = max(0, 6 - days_worked_so_far)  # 6-day work week
+    days_elapsed   = (today - curr_week).days + 1
+    days_remaining = max(0, 6 - days_elapsed)
     at_risk = []
 
     for eid, eg in week_df.groupby("emp_id"):
-        info        = emp_info(eg)
-        days_w      = int(eg["date"].nunique())
-        tot_h       = round(float(eg["total_hours"].sum()), 1)
-        ot_h        = round(float(eg["ot_hours"].sum()), 1)
-        remaining_h = round(max(0, WEEKLY_LIMIT - tot_h), 1)
-
-        if days_w > 0:
-            avg_daily_total = tot_h / days_w
-            avg_daily_ot    = ot_h  / days_w
-            projected_total = round(avg_daily_total * 6, 1)
-            projected_ot    = round(avg_daily_ot    * 6, 1)
-        else:
-            projected_total = tot_h
-            projected_ot    = ot_h
-            avg_daily_ot    = 0
-
-        risk_now  = classify(tot_h)
-        risk_proj = classify(projected_total)
-
-        # Max OT per day allowed before breach
-        max_daily_ot_allowed = round(remaining_h / max(days_remaining, 1), 1) if days_remaining else 0
+        info      = emp_info(eg)
+        days_w    = int(eg["date"].nunique())
+        tot_h     = round(float(eg["total_hours"].sum()), 1)
+        ot_h      = round(float(eg["ot_hours"].sum()), 1)
+        remaining = round(max(0, WEEKLY_LIMIT - tot_h), 1)
+        avg_daily = tot_h / days_w if days_w else tot_h
+        proj      = round(avg_daily * 6, 1)
+        max_daily_allowed = round(remaining / days_remaining, 1) if days_remaining else 0
 
         at_risk.append({
             **info,
-            "current_total":       tot_h,
-            "current_ot":          ot_h,
-            "days_worked":         days_w,
-            "days_remaining":      days_remaining,
-            "projected_total":     projected_total,
-            "projected_ot":        projected_ot,
-            "remaining_allowed":   remaining_h,
-            "max_daily_ot_allowed": max_daily_ot_allowed,
-            "avg_daily_ot":        round(avg_daily_ot, 1),
-            "risk_now":            risk_now,
-            "risk_projected":      risk_proj,
-            "will_exceed":         projected_total >= WEEKLY_LIMIT,
+            "current_total":        tot_h,
+            "current_ot":           ot_h,
+            "days_worked":          days_w,
+            "days_remaining":       days_remaining,
+            "projected_total":      proj,
+            "remaining_allowed":    remaining,
+            "max_daily_ot_allowed": max_daily_allowed,
+            "avg_daily_ot":         round(ot_h/days_w,1) if days_w else 0,
+            "risk_now":             classify(tot_h),
+            "risk_projected":       classify(proj),
+            "will_exceed":          proj >= WEEKLY_LIMIT,
         })
 
-    at_risk.sort(key=lambda e: -(e["projected_total"]))
-
+    at_risk.sort(key=lambda e: -e["projected_total"])
     return {
-        "week_start":       str(curr_week),
-        "week_end":         str(curr_week + timedelta(days=6)),
-        "today":            str(today),
-        "days_elapsed":     days_worked_so_far,
-        "days_remaining":   days_remaining,
-        "employees":        at_risk,
+        "week_start":        str(curr_week),
+        "week_end":          str(curr_week + timedelta(days=6)),
+        "today":             str(today),
+        "days_elapsed":      days_elapsed,
+        "days_remaining":    days_remaining,
+        "employees":         at_risk,
         "will_exceed_count": sum(1 for e in at_risk if e["will_exceed"]),
-        "critical_count":   sum(1 for e in at_risk if e["risk_projected"] in ("critical","exceeded")),
+        "critical_count":    sum(1 for e in at_risk if e["risk_projected"] in ("critical","exceeded")),
     }
 
-# ── TOP 10 across all days ──────────────────────────────────────
-def build_top10_history(df, n=30):
-    """Top 10 per day for last N days."""
-    top10_hist = {}
-    recent_dates = sorted(df["date"].unique())[-n:]
-    for d in recent_dates:
-        dg   = df[df["date"] == d]
-        emps = []
-        for eid, eg in dg.groupby("emp_id"):
-            info = emp_info(eg)
-            emps.append({**info, "ot_hours": round(float(eg["ot_hours"].sum()),1)})
-        emps.sort(key=lambda e: -e["ot_hours"])
-        top10_hist[str(d)] = emps[:10]
-    return top10_hist
-
-# ── SUMMARY STATS ───────────────────────────────────────────────
+# ── SUMMARY ─────────────────────────────────────────────────────────────
 def build_summary(df):
-    total_records   = len(df)
-    total_employees = df["emp_id"].nunique()
-    total_ot_hours  = round(float(df["ot_hours"].sum()), 1)
-    avg_daily_ot    = round(float(df.groupby(["date","emp_id"])["ot_hours"].sum().mean()), 2)
-    date_range      = f"{df['date'].min()} — {df['date'].max()}"
-
-    # Weeks with exceeded employees
-    exceeded_weeks = 0
-    for ws, wg in df.groupby("week"):
-        for eid, eg in wg.groupby("emp_id"):
-            if eg["total_hours"].sum() >= WEEKLY_LIMIT:
-                exceeded_weeks += 1
-                break
-
     return {
-        "total_records":    total_records,
-        "total_employees":  total_employees,
-        "total_ot_hours":   total_ot_hours,
-        "avg_daily_ot":     avg_daily_ot,
-        "date_range":       date_range,
-        "weeks_with_exceeded": exceeded_weeks,
-        "data_from":        str(df["date"].min()),
-        "data_to":          str(df["date"].max()),
+        "total_records":   len(df),
+        "total_employees": df["emp_id"].nunique(),
+        "total_ot_hours":  round(float(df["ot_hours"].sum()), 1),
+        "avg_daily_ot":    round(float(df.groupby(["date","emp_id"])["ot_hours"].sum().mean()), 2),
+        "data_from":       str(df["date"].min()),
+        "data_to":         str(df["date"].max()),
+        "units":           sorted(df["unit"].dropna().unique().tolist()),
+        "floors":          sorted(df["floor"].dropna().unique().tolist()),
+        "departments":     sorted(df["department"].dropna().unique().tolist()),
     }
 
-# ── MAIN ────────────────────────────────────────────────────────
+# ── MAIN ─────────────────────────────────────────────────────────────────
 def main():
     print("="*58)
-    print("  OT Control — Comprehensive Processor")
+    print("  OT Control Processor")
     print("="*58)
+    print(f"\nScanning {DATA_DIR}/...")
 
     raw = load_all()
     if raw.empty:
-        output = {"generated_at": datetime.now().isoformat(), "ot_limit": WEEKLY_LIMIT,
-                  "summary": {}, "daily": {}, "weekly": {}, "monthly": {},
-                  "quarterly": {}, "yearly": {}, "forecast": {}, "top10_history": {},
-                  "risk_meta": {r[0]:{"color":r[2],"bg":r[3]} for r in RISK_CFG}}
+        output = {
+            "generated_at": datetime.now().isoformat(),
+            "ot_limit": WEEKLY_LIMIT,
+            "summary": {}, "forecast": {},
+            "daily": {}, "weekly": {}, "monthly": {},
+            "quarterly": {}, "yearly": {},
+            "risk_meta": {r[0]:{"color":r[2],"bg":r[3]} for r in RISK_CFG},
+        }
     else:
         df = normalise(raw)
         if df.empty:
-            print("  No valid records after normalisation.")
+            print("  No valid data after normalisation.")
             return
-
-        print(f"\n  Total valid records: {len(df):,}")
-        print(f"  Employees: {df['emp_id'].nunique()}")
-        print(f"  Date range: {df['date'].min()} → {df['date'].max()}")
         print()
-
-        print("  Building daily…")
-        daily = build_daily(df)
-        print(f"    {len(daily)} days")
-
-        print("  Building weekly…")
-        weekly = build_weekly(df)
-        print(f"    {len(weekly)} weeks")
-
-        print("  Building monthly…")
-        monthly = build_monthly(df)
-        print(f"    {len(monthly)} months")
-
-        print("  Building quarterly…")
+        print("  Building aggregations...")
+        daily     = build_daily(df)
+        weekly    = build_weekly(df)
+        monthly   = build_monthly(df)
         quarterly = build_quarterly(df)
-        print(f"    {len(quarterly)} quarters")
-
-        print("  Building yearly…")
-        yearly = build_yearly(df)
-        print(f"    {len(yearly)} years")
-
-        print("  Building forecast…")
-        forecast = build_forecast(df)
-        print(f"    {forecast['will_exceed_count']} employees projected to exceed")
-
-        print("  Building top-10 history…")
-        top10 = build_top10_history(df)
-
-        summary = build_summary(df)
-        risk_meta = {r[0]:{"color":r[2],"bg":r[3],"range":f"{r[1]}–{r[2]}h"} for r in RISK_CFG}
+        yearly    = build_yearly(df)
+        forecast  = build_forecast(df)
+        summary   = build_summary(df)
+        print(f"  Daily: {len(daily)} days")
+        print(f"  Weekly: {len(weekly)} weeks")
+        print(f"  Monthly: {len(monthly)} months")
+        print(f"  Forecast: {forecast['will_exceed_count']} employees projected to exceed")
 
         output = {
-            "generated_at":  datetime.now().isoformat(),
-            "ot_limit":      WEEKLY_LIMIT,
-            "summary":       summary,
-            "forecast":      forecast,
-            "daily":         daily,
-            "weekly":        weekly,
-            "monthly":       monthly,
-            "quarterly":     quarterly,
-            "yearly":        yearly,
-            "top10_history": top10,
-            "risk_meta":     risk_meta,
+            "generated_at": datetime.now().isoformat(),
+            "ot_limit":     WEEKLY_LIMIT,
+            "summary":      summary,
+            "forecast":     forecast,
+            "daily":        daily,
+            "weekly":       weekly,
+            "monthly":      monthly,
+            "quarterly":    quarterly,
+            "yearly":       yearly,
+            "risk_meta":    {r[0]:{"color":r[2],"bg":r[3]} for r in RISK_CFG},
         }
 
     os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
     with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
         json.dump(output, f, separators=(",",":"), default=str)
-
-    size_kb = os.path.getsize(OUTPUT_PATH) / 1024
-    print(f"\n✅ Written: {OUTPUT_PATH} ({size_kb:.1f} KB)")
+    kb = os.path.getsize(OUTPUT_PATH)/1024
+    print(f"\n✅ Written: {OUTPUT_PATH} ({kb:.0f} KB)")
     print("="*58)
 
 if __name__ == "__main__":
