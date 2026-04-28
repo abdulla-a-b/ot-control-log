@@ -322,6 +322,7 @@ footer a{color:var(--amber);text-decoration:none}
       <div class="hd-s"><label>Weekly Limit</label><span id="hs-limit">72h</span></div>
       <div class="hd-s"><label>Employees</label><span id="hs-emp">—</span></div>
       <div class="hd-s"><label>Data Range</label><span id="hs-range" style="font-size:11px">—</span></div>
+    <div class="hd-s"><label>Units</label><span id="hs-units" style="font-size:11px">—</span></div>
     </div>
     <div class="hd-right">
       <div class="live-lbl"><div class="pulse-dot"></div>Live</div>
@@ -374,7 +375,7 @@ footer a{color:var(--amber);text-decoration:none}
         <div class="forecast-wrap">
           <table class="forecast-tbl" id="fc-tbl">
             <thead><tr>
-              <th>Employee</th><th>Dept</th><th>Line</th>
+              <th>Employee</th><th>Floor</th><th>Unit</th><th>Dept</th>
               <th>Days Done</th><th>Current hrs</th><th>Projected</th>
               <th>Max OT/day</th><th>Risk Now</th><th>Projected Risk</th>
             </tr></thead>
@@ -393,12 +394,22 @@ footer a{color:var(--amber);text-decoration:none}
   </div>
   <div class="row2">
     <div class="panel">
-      <div class="ph"><h3>📊 Line-wise OT Load</h3></div>
-      <div class="pb" id="fc-line-bars"></div>
+      <div class="ph"><h3>🏭 By Unit</h3></div>
+      <div class="pb" id="fc-unit-bars"></div>
     </div>
     <div class="panel">
-      <div class="ph"><h3>📊 Section-wise OT Load</h3></div>
-      <div class="pb" id="fc-sect-bars"></div>
+      <div class="ph"><h3>🏢 By Floor</h3></div>
+      <div class="pb" id="fc-floor-bars"></div>
+    </div>
+  </div>
+  <div class="row2">
+    <div class="panel">
+      <div class="ph"><h3>📊 By Department</h3></div>
+      <div class="pb" id="fc-dept-bars"></div>
+    </div>
+    <div class="panel">
+      <div class="ph"><h3>👥 Gender Split</h3></div>
+      <div class="pb" id="fc-gender-bars"></div>
     </div>
   </div>
 </div>
@@ -447,13 +458,17 @@ footer a{color:var(--amber);text-decoration:none}
       </div>
     </div>
     <div>
-      <div class="panel" style="margin-bottom:16px">
-        <div class="ph"><h3>📊 By Line</h3></div>
-        <div class="pb" id="w-line-bars"></div>
+      <div class="panel" style="margin-bottom:12px">
+        <div class="ph"><h3>🏭 By Unit</h3></div>
+        <div class="pb" id="w-unit-bars"></div>
+      </div>
+      <div class="panel" style="margin-bottom:12px">
+        <div class="ph"><h3>🏢 By Floor</h3></div>
+        <div class="pb" id="w-floor-bars"></div>
       </div>
       <div class="panel">
-        <div class="ph"><h3>📊 By Section</h3></div>
-        <div class="pb" id="w-sect-bars"></div>
+        <div class="ph"><h3>👥 Gender</h3></div>
+        <div class="pb" id="w-gender-bars"></div>
       </div>
     </div>
   </div>
@@ -472,8 +487,12 @@ footer a{color:var(--amber);text-decoration:none}
     </div>
   </div>
   <div class="row2">
-    <div class="panel"><div class="ph"><h3>📊 By Line</h3></div><div class="pb" id="m-line-bars"></div></div>
+    <div class="panel"><div class="ph"><h3>🏭 By Unit</h3></div><div class="pb" id="m-unit-bars"></div></div>
+    <div class="panel"><div class="ph"><h3>🏢 By Floor</h3></div><div class="pb" id="m-floor-bars"></div></div>
+  </div>
+  <div class="row2">
     <div class="panel"><div class="ph"><h3>📊 By Department</h3></div><div class="pb" id="m-dept-bars"></div></div>
+    <div class="panel"><div class="ph"><h3>👥 Gender Split</h3></div><div class="pb" id="m-gender-bars"></div></div>
   </div>
 </div>
 
@@ -551,6 +570,7 @@ function init(){
   document.getElementById('hs-emp').textContent=s.total_employees||'—';
   document.getElementById('hs-range').textContent=
     s.data_from&&s.data_to?`${fmtDate(s.data_from)} – ${fmtDate(s.data_to)}`:'—';
+  if(document.getElementById('hs-units')) document.getElementById('hs-units').textContent=(s.units||[]).join(' · ')||'—';
   document.getElementById('gen-ts').textContent=
     `Updated ${new Date(D.generated_at).toLocaleString()}`;
   setP('forecast');
@@ -662,8 +682,9 @@ function renderForecast(){
     const rowCls=e.will_exceed?'alert-row':'';
     return `<tr class="${rowCls}" onclick="openModal('${e.emp_id}','forecast')">
       <td><div class="emp-n">${e.emp_name}</div><div class="emp-id">${e.emp_id}</div></td>
-      <td class="mono" style="font-size:11px">${e.department||'—'}</td>
-      <td class="mono" style="font-size:11px">${e.line||'—'}</td>
+      <td class="mono" style="font-size:11px">\${e.floor||'—'}</td>
+      <td class="mono" style="font-size:11px">\${e.unit||'—'}</td>
+      <td class="mono" style="font-size:11px">\${e.department||'—'}</td>
       <td style="text-align:center;font-family:var(--fm)">${e.days_worked}/${6-e.days_remaining}</td>
       <td>
         <div class="mono num-big" style="color:${hCol(e.current_total)}">${e.current_total}h</div>
@@ -678,23 +699,26 @@ function renderForecast(){
     </tr>`;
   }).join('');
 
-  // Get weekly data for group bars
+  // Group bars from weekly data
   const currWeekKey=fc.week_start;
   const wk=D.weekly&&D.weekly[currWeekKey];
   if(wk){
-    renderGroupBars('fc-line-bars', wk.by_line, lim, true);
-    renderGroupBars('fc-sect-bars', wk.by_section, lim, true);
+    renderGroupBars('fc-unit-bars',  wk.by_unit||{},       lim, true);
+    renderGroupBars('fc-floor-bars', wk.by_floor||{},      lim, true);
+    renderGroupBars('fc-dept-bars',  wk.by_department||{}, lim, true);
+    renderGenderBars('fc-gender-bars', wk.gender||{});
   } else {
-    // Build from forecast emps
-    const byLine={}, bySect={};
+    const byUnit={};
     emps.forEach(e=>{
-      const l=e.line||'—'; if(!byLine[l]) byLine[l]={avg_hours:0,employees:0,risk_counts:{}};
-      byLine[l].avg_hours+=e.current_total; byLine[l].employees++;
-      byLine[l].risk_counts[e.risk_now]=(byLine[l].risk_counts[e.risk_now]||0)+1;
+      const u=e.unit||'—'; if(!byUnit[u]) byUnit[u]={avg_hours:0,employees:0,risk_counts:{}};
+      byUnit[u].avg_hours+=e.current_total; byUnit[u].employees++;
+      byUnit[u].risk_counts[e.risk_now]=(byUnit[u].risk_counts[e.risk_now]||0)+1;
     });
-    Object.values(byLine).forEach(g=>g.avg_hours=round2(g.avg_hours/g.employees));
-    renderGroupBars('fc-line-bars', byLine, lim, false);
-    renderGroupBars('fc-sect-bars', {}, lim, false);
+    Object.values(byUnit).forEach(g=>g.avg_hours=round2(g.avg_hours/g.employees));
+    renderGroupBars('fc-unit-bars',  byUnit, lim, false);
+    renderGroupBars('fc-floor-bars', {}, lim, false);
+    renderGroupBars('fc-dept-bars',  {}, lim, false);
+    renderGenderBars('fc-gender-bars', {});
   }
 }
 
@@ -792,8 +816,9 @@ function renderWeekly(key){
     <button class="flt-pill${wRiskFilter===r?' active':''}" onclick="setWRisk('${r}')">${r==='all'?'All':`${RI[r]} ${cap(r)}`}</button>`).join('');
 
   renderWeeklyTable(wk);
-  renderGroupBars('w-line-bars', wk.by_line||{}, D.ot_limit, true);
-  renderGroupBars('w-sect-bars', wk.by_section||{}, D.ot_limit, true);
+  renderGroupBars('w-unit-bars',  wk.by_unit||{},       D.ot_limit, true);
+  renderGroupBars('w-floor-bars', wk.by_floor||{},      D.ot_limit, true);
+  renderGenderBars('w-gender-bars', wk.gender||{});
 }
 function setWRisk(r){wRiskFilter=r;renderWeekly(selKey());}
 
@@ -856,6 +881,9 @@ function renderMonthly(key){
   renderTop10('m-top10', mo.top10||[], 14);
   renderGroupBars('m-line-bars', mo.by_line||{}, D.ot_limit, false);
   renderGroupBars('m-dept-bars', mo.by_department||{}, D.ot_limit, false);
+  if(document.getElementById('m-unit-bars')) renderGroupBars('m-unit-bars', mo.by_unit||{}, D.ot_limit, false);
+  if(document.getElementById('m-floor-bars')) renderGroupBars('m-floor-bars', mo.by_floor||{}, D.ot_limit, false);
+  if(document.getElementById('m-gender-bars')) renderGenderBars('m-gender-bars', mo.gender||{});
 }
 
 // ─────────────────────────────────────────────────────────────
