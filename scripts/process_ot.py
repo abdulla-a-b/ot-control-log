@@ -8,10 +8,32 @@ Supports real attendance file format:
   OT | In Time | Out Time | Department | Section | Team | Line | Gender
 """
 
-import os, json, glob, re
+import os, json, glob, re, math
 from datetime import date, datetime, timedelta
 from collections import defaultdict
 import pandas as pd
+
+def safe_num(v, default=0):
+    """Return 0 (or default) for NaN/None/inf — keeps JSON valid."""
+    try:
+        f = float(v)
+        if math.isnan(f) or math.isinf(f):
+            return default
+        return round(f, 2)
+    except (TypeError, ValueError):
+        return default
+
+def sanitize(obj):
+    """Recursively replace NaN/inf/None with JSON-safe values."""
+    if isinstance(obj, dict):
+        return {k: sanitize(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [sanitize(v) for v in obj]
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return 0
+        return obj
+    return obj
 
 WEEKLY_LIMIT = 72
 DATA_DIR     = "data"
@@ -158,15 +180,26 @@ def normalise(raw):
         df["worked_hours"] = df.apply(
             lambda r: calc_worked_hours(r["_in_h"], r["_out_h"]), axis=1
         )
+        # ── NaN guard: rows with unparseable Out Time (e.g. "--:--") ──
+        # Fall back to 9.17h regular + OT for those rows
+        nan_mask = df["worked_hours"].isna()
+        if nan_mask.any():
+            print(f"  NOTE: {nan_mask.sum()} rows have invalid In/Out times — using 9.17h+OT fallback")
+        df.loc[nan_mask, "worked_hours"] = 9.17 + df.loc[nan_mask, "ot_hours"]
+        df["worked_hours"] = pd.to_numeric(df["worked_hours"], errors="coerce").fillna(9.17)
         # Regular = worked - OT (floor at 0)
         df["regular_hours"] = (df["worked_hours"] - df["ot_hours"]).clip(lower=0)
         df["total_hours"]   = df["worked_hours"]
         df.drop(columns=["_in_h","_out_h"], inplace=True)
     else:
-        # Fallback: assume 9h regular
-        df["regular_hours"] = 9.0
+        # Fallback: assume 9.17h regular (typical shift)
+        df["regular_hours"] = 9.17
         df["total_hours"]   = df["regular_hours"] + df["ot_hours"]
         df["worked_hours"]  = df["total_hours"]
+
+    # Final safety net: replace any remaining NaN in numeric cols with 0
+    for col in ["ot_hours","regular_hours","total_hours","worked_hours"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
     # Fill optional string columns
     for col in ["emp_name","designation","floor","unit","shift",
@@ -567,6 +600,8 @@ def main():
         }
 
     os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
+    # ── Sanitize: replace any NaN/inf that slipped through with 0 ──
+    output = sanitize(output)
     with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
         json.dump(output, f, separators=(",",":"), default=str)
     kb = os.path.getsize(OUTPUT_PATH)/1024
