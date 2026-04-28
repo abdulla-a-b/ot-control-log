@@ -1,1 +1,1108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>OT Control Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root{
+  --bg:#07090E;--s1:#0C1018;--s2:#111620;--s3:#161D2A;
+  --b1:#1A2235;--b2:#1F2940;--b3:#253047;
+  --amber:#F59E0B;--amber2:#D97706;--amber-g:rgba(245,158,11,.1);
+  --teal:#22D3EE;--teal-g:rgba(34,211,238,.08);
+  --text:#C9D4E8;--tdim:#6B7A8F;--tmut:#2E3A4E;
+  --safe:#34D399;--safe-b:#052E16;
+  --caut:#FBBF24;--caut-b:#1C1501;
+  --warn:#FB923C;--warn-b:#1E0A00;
+  --crit:#F87171;--crit-b:#1E0505;
+  --excd:#E879F9;--excd-b:#1A0026;
+  --r:8px;--r2:12px;
+  --fh:'Syne',sans-serif;
+  --fb:'DM Sans',sans-serif;
+  --fm:'DM Mono',monospace;
+  --shadow:0 8px 32px rgba(0,0,0,.5);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{background:var(--bg);font-family:var(--fb);color:var(--text);min-height:100vh;overflow-x:hidden}
+body::before{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
+  background:radial-gradient(ellipse 60% 40% at 5% 5%,rgba(245,158,11,.05) 0%,transparent 60%),
+            radial-gradient(ellipse 40% 30% at 95% 95%,rgba(34,211,238,.04) 0%,transparent 60%)}
+::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--b2);border-radius:2px}
 
+/* ── LOADING ── */
+#loading{position:fixed;inset:0;background:var(--bg);z-index:999;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px}
+.ld-logo{font-family:var(--fh);font-size:32px;font-weight:800;color:var(--amber);letter-spacing:-1px}
+.ld-sub{font-size:12px;color:var(--tdim);text-transform:uppercase;letter-spacing:2px}
+.ld-bar{width:240px;height:3px;background:var(--b2);border-radius:2px;overflow:hidden;margin-top:8px}
+.ld-fill{height:100%;background:linear-gradient(90deg,var(--amber),var(--teal));animation:ldAnim 1.8s ease-in-out infinite}
+@keyframes ldAnim{0%{width:0%}50%{width:80%}100%{width:100%}}
+
+/* ── HEADER ── */
+header{background:var(--s1);border-bottom:1px solid var(--b1);position:sticky;top:0;z-index:100}
+.hd-stripe{height:3px;background:linear-gradient(90deg,var(--amber) 0%,var(--amber2) 30%,var(--teal) 100%)}
+.hd-inner{max-width:1600px;margin:0 auto;padding:0 28px;height:62px;display:flex;align-items:center;gap:20px}
+.hd-logo{display:flex;align-items:center;gap:10px;flex-shrink:0}
+.hd-icon{width:36px;height:36px;background:var(--amber);border-radius:8px;
+  display:flex;align-items:center;justify-content:center;font-size:18px}
+.hd-brand h1{font-family:var(--fh);font-size:17px;font-weight:800;color:var(--amber);letter-spacing:-.3px;line-height:1}
+.hd-brand p{font-size:10px;color:var(--tdim);text-transform:uppercase;letter-spacing:.8px;margin-top:1px}
+.hd-div{width:1px;height:32px;background:var(--b2);flex-shrink:0}
+.hd-stats{display:flex;gap:20px}
+.hd-s label{display:block;font-size:9px;color:var(--tmut);text-transform:uppercase;letter-spacing:.8px;font-family:var(--fh)}
+.hd-s span{font-family:var(--fm);font-size:14px;color:var(--amber)}
+.hd-right{margin-left:auto;display:flex;align-items:center;gap:12px}
+.pulse-dot{width:7px;height:7px;background:var(--safe);border-radius:50%;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+.live-lbl{font-size:10px;color:var(--tdim);text-transform:uppercase;letter-spacing:.8px;display:flex;align-items:center;gap:6px}
+#gen-ts{font-family:var(--fm);font-size:10px;color:var(--tdim)}
+.btn-ref{font-family:var(--fh);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;
+  background:transparent;border:1px solid var(--amber);color:var(--amber);padding:6px 14px;
+  border-radius:var(--r);cursor:pointer;transition:all .15s}
+.btn-ref:hover{background:var(--amber);color:#000}
+
+/* ── PERIOD TABS ── */
+.period-bar{background:var(--s2);border-bottom:1px solid var(--b1)}
+.period-inner{max-width:1600px;margin:0 auto;padding:0 28px;display:flex;align-items:center;gap:4px}
+.ptab{font-family:var(--fh);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;
+  background:transparent;border:none;border-bottom:3px solid transparent;
+  color:var(--tdim);padding:14px 20px;cursor:pointer;transition:all .15s;white-space:nowrap}
+.ptab.active{color:var(--amber);border-bottom-color:var(--amber)}
+.ptab:hover:not(.active){color:var(--text);border-bottom-color:var(--b3)}
+.period-right{margin-left:auto;display:flex;align-items:center;gap:8px;padding:8px 0}
+.period-sel{background:var(--s3);border:1px solid var(--b2);color:var(--text);
+  font-family:var(--fm);font-size:11px;padding:5px 10px;border-radius:var(--r);
+  outline:none;cursor:pointer}
+.period-sel:focus{border-color:var(--amber)}
+
+/* ── MAIN CONTENT ── */
+main{max-width:1600px;margin:0 auto;padding:24px 28px 80px;position:relative;z-index:1}
+
+/* ── KPI STRIP ── */
+.kpi-row{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:24px}
+@media(max-width:1100px){.kpi-row{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:600px){.kpi-row{grid-template-columns:repeat(2,1fr)}}
+.kpi{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r2);padding:18px 20px;
+  position:relative;overflow:hidden;transition:transform .15s}
+.kpi:hover{transform:translateY(-2px)}
+.kpi::after{content:'';position:absolute;bottom:0;left:0;right:0;height:2px}
+.kpi.k-total::after{background:linear-gradient(90deg,var(--amber),var(--teal))}
+.kpi.k-ot::after{background:var(--amber)}
+.kpi.k-avg::after{background:var(--teal)}
+.kpi.k-risk::after{background:var(--crit)}
+.kpi.k-exc::after{background:var(--excd)}
+.kpi.k-comp::after{background:var(--safe)}
+.kpi-v{font-family:var(--fh);font-size:36px;font-weight:800;line-height:1;letter-spacing:-1px}
+.kpi.k-total .kpi-v{color:var(--amber)}
+.kpi.k-ot .kpi-v{color:var(--amber)}
+.kpi.k-avg .kpi-v{color:var(--teal)}
+.kpi.k-risk .kpi-v{color:var(--crit)}
+.kpi.k-exc .kpi-v{color:var(--excd)}
+.kpi.k-comp .kpi-v{color:var(--safe)}
+.kpi-l{font-size:11px;color:var(--tdim);text-transform:uppercase;letter-spacing:.6px;margin-top:4px;font-family:var(--fh)}
+.kpi-sub{font-family:var(--fm);font-size:10px;color:var(--tmut);margin-top:5px}
+
+/* ── GRID LAYOUTS ── */
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
+.row3{display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:20px}
+@media(max-width:1000px){.row2,.row3{grid-template-columns:1fr}}
+
+/* ── PANEL ── */
+.panel{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r2);overflow:hidden}
+.ph{background:var(--s2);border-bottom:1px solid var(--b1);padding:14px 20px;
+  display:flex;align-items:center;justify-content:space-between}
+.ph h3{font-family:var(--fh);font-size:13px;font-weight:700;text-transform:uppercase;
+  letter-spacing:.8px;color:var(--amber)}
+.ph-badge{font-family:var(--fm);font-size:10px;color:var(--tdim);
+  background:var(--bg);border:1px solid var(--b2);padding:2px 8px;border-radius:4px}
+.pb{padding:20px}
+
+/* ── CHART CANVAS ── */
+.chart-wrap{position:relative;width:100%}
+.chart-wrap canvas{max-height:280px}
+
+/* ── TOP 10 BARS ── */
+.t10-item{display:grid;grid-template-columns:28px 1fr auto;align-items:center;gap:10px;margin-bottom:12px}
+.t10-rank{font-family:var(--fh);font-size:11px;font-weight:700;color:var(--tdim);text-align:center}
+.t10-rank.gold{color:#F59E0B}.t10-rank.silver{color:#9CA3AF}.t10-rank.bronze{color:#B45309}
+.t10-info{min-width:0}
+.t10-name{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.t10-sub{font-size:10px;color:var(--tdim);font-family:var(--fm)}
+.t10-bar-wrap{position:relative}
+.t10-bar-bg{height:6px;background:var(--bg);border-radius:3px;overflow:hidden}
+.t10-bar-fill{height:100%;border-radius:3px;transition:width .5s cubic-bezier(.4,0,.2,1)}
+.t10-val{font-family:var(--fm);font-size:13px;font-weight:500;text-align:right;min-width:40px}
+
+/* ── FORECAST TABLE ── */
+.forecast-wrap{overflow-x:auto}
+.forecast-tbl{width:100%;border-collapse:collapse;font-size:12px}
+.forecast-tbl thead th{background:var(--s2);padding:9px 14px;font-family:var(--fh);font-size:10px;
+  font-weight:700;text-transform:uppercase;letter-spacing:.7px;color:var(--tdim);
+  border-bottom:1px solid var(--b2);white-space:nowrap;text-align:left}
+.forecast-tbl tbody tr{border-bottom:1px solid var(--b1);transition:background .1s;cursor:pointer}
+.forecast-tbl tbody tr:hover{background:var(--s3)}
+.forecast-tbl tbody td{padding:9px 14px;vertical-align:middle}
+.emp-n{font-weight:600;font-size:13px}
+.emp-id{font-family:var(--fm);font-size:10px;color:var(--tdim)}
+.mini-prog{min-width:90px}
+.mp-bar{height:5px;background:var(--bg);border-radius:3px;margin-top:3px;overflow:hidden}
+.mp-fill{height:100%;border-radius:3px}
+.mp-lbl{font-family:var(--fm);font-size:10px;color:var(--tdim)}
+.warn-tag{font-family:var(--fh);font-size:10px;font-weight:700;text-transform:uppercase;
+  padding:2px 7px;border-radius:3px;letter-spacing:.4px}
+.warn-tag.exceeded{background:var(--excd-b);color:var(--excd)}
+.warn-tag.critical{background:var(--crit-b);color:var(--crit)}
+.warn-tag.warning{background:var(--warn-b);color:var(--warn)}
+.warn-tag.caution{background:var(--caut-b);color:var(--caut)}
+.warn-tag.safe{background:var(--safe-b);color:var(--safe)}
+.mono{font-family:var(--fm)}
+.num-big{font-family:var(--fm);font-size:15px;font-weight:500}
+.alert-row{background:rgba(248,113,113,.04)!important}
+.proj-over{color:var(--crit);font-family:var(--fm);font-size:13px}
+.proj-warn{color:var(--warn);font-family:var(--fm);font-size:13px}
+.proj-ok{color:var(--safe);font-family:var(--fm);font-size:13px}
+
+/* ── GROUP BARS ── */
+.grp-bar{margin-bottom:14px}
+.grp-bar:last-child{margin-bottom:0}
+.gb-top{display:flex;justify-content:space-between;margin-bottom:4px}
+.gb-name{font-size:12px;font-weight:600}
+.gb-val{font-family:var(--fm);font-size:11px;color:var(--tdim)}
+.gb-track{height:7px;background:var(--bg);border-radius:3px;overflow:hidden;position:relative}
+.gb-fill{height:100%;border-radius:3px;transition:width .6s}
+.gb-pills{display:flex;gap:4px;margin-top:5px;flex-wrap:wrap}
+.rpill{font-family:var(--fm);font-size:10px;padding:1px 7px;border-radius:2px;font-weight:600}
+.rpill.exceeded{background:var(--excd-b);color:var(--excd)}
+.rpill.critical{background:var(--crit-b);color:var(--crit)}
+.rpill.warning{background:var(--warn-b);color:var(--warn)}
+.rpill.caution{background:var(--caut-b);color:var(--caut)}
+.rpill.safe{background:var(--safe-b);color:var(--safe)}
+
+/* ── RISK LEGEND ── */
+.risk-legend{display:flex;gap:12px;flex-wrap:wrap;padding:12px 20px;
+  border-top:1px solid var(--b1);background:var(--s2)}
+.rl-item{display:flex;align-items:center;gap:5px;font-family:var(--fm);font-size:10px;color:var(--tdim)}
+.rl-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+
+/* ── FULL TABLE ── */
+.ftbl-wrap{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r2);
+  overflow:hidden;margin-bottom:20px}
+.ftbl-hd{background:var(--s2);border-bottom:1px solid var(--b1);padding:14px 20px;
+  display:flex;align-items:center;flex-wrap:wrap;gap:10px}
+.ftbl-hd h3{font-family:var(--fh);font-size:13px;font-weight:700;text-transform:uppercase;
+  letter-spacing:.8px;color:var(--amber);margin-right:auto}
+.flt-pill{font-family:var(--fh);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;
+  background:transparent;border:1px solid var(--b2);color:var(--tdim);padding:4px 10px;
+  border-radius:4px;cursor:pointer;transition:all .12s}
+.flt-pill.active{border-color:var(--amber);color:var(--amber);background:var(--amber-g)}
+.flt-pill:hover:not(.active){border-color:var(--tdim);color:var(--text)}
+.srch{background:var(--bg);border:1px solid var(--b2);color:var(--text);
+  font-family:var(--fm);font-size:11px;padding:5px 10px;border-radius:var(--r);
+  outline:none;width:180px}
+.srch:focus{border-color:var(--amber)}
+.srch::placeholder{color:var(--tmut)}
+#emp-count{font-family:var(--fm);font-size:11px;color:var(--tdim)}
+.tbl-scroll{overflow-x:auto}
+.main-tbl{width:100%;border-collapse:collapse;font-size:12px}
+.main-tbl thead th{background:var(--s2);padding:9px 14px;font-family:var(--fh);font-size:10px;
+  font-weight:700;text-transform:uppercase;letter-spacing:.7px;color:var(--tdim);
+  border-bottom:1px solid var(--b2);white-space:nowrap;text-align:left;cursor:pointer;user-select:none}
+.main-tbl thead th:hover{color:var(--amber)}
+.main-tbl thead th.asc::after{content:' ▲';color:var(--amber);font-size:8px}
+.main-tbl thead th.desc::after{content:' ▼';color:var(--amber);font-size:8px}
+.main-tbl tbody tr{border-bottom:1px solid var(--b1);transition:background .1s;cursor:pointer}
+.main-tbl tbody tr:hover{background:var(--s3)}
+.main-tbl tbody td{padding:9px 14px;vertical-align:middle}
+.rbadge{display:inline-flex;align-items:center;gap:4px;font-family:var(--fh);font-size:10px;
+  font-weight:700;text-transform:uppercase;letter-spacing:.4px;padding:2px 8px;border-radius:3px}
+.rbadge.exceeded{background:var(--excd-b);color:var(--excd);border:1px solid rgba(232,121,249,.2)}
+.rbadge.critical{background:var(--crit-b);color:var(--crit);border:1px solid rgba(248,113,113,.2)}
+.rbadge.warning{background:var(--warn-b);color:var(--warn);border:1px solid rgba(251,146,60,.2)}
+.rbadge.caution{background:var(--caut-b);color:var(--caut);border:1px solid rgba(251,191,36,.2)}
+.rbadge.safe{background:var(--safe-b);color:var(--safe);border:1px solid rgba(52,211,153,.2)}
+.mini-prog2{min-width:80px}
+.mp2-bar{height:4px;background:var(--bg);border-radius:2px;margin-top:3px;overflow:hidden}
+.mp2-fill{height:100%;border-radius:2px}
+.mp2-lbl{font-family:var(--fm);font-size:9px;color:var(--tdim)}
+
+/* ── MODAL ── */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:500;
+  display:none;align-items:center;justify-content:center;padding:20px}
+.overlay.open{display:flex}
+.modal{background:var(--s1);border:1px solid var(--b2);border-radius:var(--r2);
+  max-width:680px;width:100%;max-height:92vh;overflow-y:auto;
+  box-shadow:0 24px 80px rgba(0,0,0,.7);animation:popIn .18s ease}
+@keyframes popIn{from{opacity:0;transform:scale(.95)}to{opacity:1;transform:scale(1)}}
+.modal-hd{background:var(--s2);padding:20px 24px;border-bottom:1px solid var(--b2);
+  display:flex;justify-content:space-between;align-items:center}
+.modal-hd h3{font-family:var(--fh);font-size:20px;font-weight:800;text-transform:uppercase}
+.modal-x{background:var(--bg);border:1px solid var(--b2);color:var(--tdim);cursor:pointer;
+  border-radius:4px;width:28px;height:28px;font-size:14px;display:flex;align-items:center;justify-content:center}
+.modal-body{padding:22px 24px}
+.m-stat-row{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px}
+.m-stat{background:var(--s2);border:1px solid var(--b2);border-radius:var(--r);padding:12px;text-align:center}
+.m-stat .mv{font-family:var(--fm);font-size:20px;margin-top:3px}
+.m-stat .ml{font-family:var(--fh);font-size:9px;text-transform:uppercase;letter-spacing:.8px;color:var(--tdim)}
+.m-prog{height:8px;background:var(--bg);border-radius:3px;margin:10px 0 3px;overflow:hidden}
+.m-prog-fill{height:100%;border-radius:3px}
+.m-ticks{display:flex;justify-content:space-between;font-family:var(--fm);font-size:9px;color:var(--tmut);margin-bottom:16px}
+.daily-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(95px,1fr));gap:8px;margin-bottom:18px}
+.day-c{background:var(--s2);border:1px solid var(--b2);border-radius:var(--r);padding:10px;text-align:center}
+.day-c.has-ot{border-color:rgba(251,191,36,.25)}
+.day-c.high-ot{border-color:rgba(248,113,113,.25);background:rgba(248,113,113,.04)}
+.day-c.absent{opacity:.35}
+.day-n{font-family:var(--fh);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--tdim)}
+.day-d{font-family:var(--fm);font-size:9px;color:var(--tmut);margin:1px 0 5px}
+.day-t{font-family:var(--fh);font-size:22px;font-weight:800}
+.day-c.has-ot .day-t{color:var(--caut)}
+.day-c.high-ot .day-t{color:var(--crit)}
+.day-c.absent .day-t{color:var(--tmut);font-size:18px}
+.day-b{font-family:var(--fm);font-size:9px;color:var(--tmut)}
+
+/* ── UPLOAD HINT ── */
+.upload-hint{background:var(--s2);border:1px dashed var(--b3);border-radius:var(--r2);
+  padding:20px;text-align:center;margin-bottom:20px;display:flex;align-items:center;gap:16px}
+.uh-icon{font-size:28px;flex-shrink:0}
+.uh-text h4{font-family:var(--fh);font-size:13px;font-weight:700;text-transform:uppercase;
+  letter-spacing:.5px;color:var(--amber);margin-bottom:4px}
+.uh-text p{font-size:11px;color:var(--tdim);line-height:1.6}
+.uh-text a{color:var(--teal);text-decoration:none}
+.uh-text a:hover{text-decoration:underline}
+
+/* ── EMPTY / NO DATA ── */
+.empty{text-align:center;padding:50px 20px}
+.empty .ei{font-size:44px;display:block;margin-bottom:10px}
+.empty h3{font-family:var(--fh);font-size:18px;text-transform:uppercase;color:var(--tdim)}
+.empty p{font-size:12px;color:var(--tmut);margin-top:6px}
+
+/* ── FOOTER ── */
+footer{border-top:1px solid var(--b1);padding:16px 28px;text-align:center;
+  font-family:var(--fm);font-size:10px;color:var(--tmut)}
+footer a{color:var(--amber);text-decoration:none}
+</style>
+</head>
+<body>
+
+<!-- Loading -->
+<div id="loading">
+  <div class="ld-logo">⏱ OT Control</div>
+  <div class="ld-sub">Loading Dashboard Data</div>
+  <div class="ld-bar"><div class="ld-fill"></div></div>
+</div>
+
+<!-- Employee Modal -->
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <div class="modal-hd">
+      <div>
+        <h3 id="m-name">—</h3>
+        <div id="m-meta" style="font-family:var(--fm);font-size:11px;color:var(--tdim);margin-top:3px"></div>
+      </div>
+      <button class="modal-x" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body" id="m-body"></div>
+  </div>
+</div>
+
+<!-- Header -->
+<header>
+  <div class="hd-stripe"></div>
+  <div class="hd-inner">
+    <div class="hd-logo">
+      <div class="hd-icon">⏱</div>
+      <div class="hd-brand"><h1>OT Control</h1><p>Overtime Management System</p></div>
+    </div>
+    <div class="hd-div"></div>
+    <div class="hd-stats">
+      <div class="hd-s"><label>Weekly Limit</label><span id="hs-limit">72h</span></div>
+      <div class="hd-s"><label>Employees</label><span id="hs-emp">—</span></div>
+      <div class="hd-s"><label>Data Range</label><span id="hs-range" style="font-size:11px">—</span></div>
+    </div>
+    <div class="hd-right">
+      <div class="live-lbl"><div class="pulse-dot"></div>Live</div>
+      <span id="gen-ts">—</span>
+      <button class="btn-ref" onclick="loadData()">↻ Refresh</button>
+    </div>
+  </div>
+</header>
+
+<!-- Period tabs -->
+<div class="period-bar">
+  <div class="period-inner">
+    <button class="ptab active" data-p="forecast" onclick="setP('forecast')">🔮 Forecast</button>
+    <button class="ptab" data-p="daily"    onclick="setP('daily')">📅 Daily</button>
+    <button class="ptab" data-p="weekly"   onclick="setP('weekly')">📆 Weekly</button>
+    <button class="ptab" data-p="monthly"  onclick="setP('monthly')">🗓 Monthly</button>
+    <button class="ptab" data-p="quarterly" onclick="setP('quarterly')">📊 Quarterly</button>
+    <button class="ptab" data-p="yearly"   onclick="setP('yearly')">📈 Yearly</button>
+    <div class="period-right">
+      <select class="period-sel" id="period-sel" onchange="onPeriodSel()">
+        <option value="">— Select —</option>
+      </select>
+    </div>
+  </div>
+</div>
+
+<!-- Main -->
+<main>
+
+<!-- Upload hint -->
+<div class="upload-hint">
+  <div class="uh-icon">📤</div>
+  <div class="uh-text">
+    <h4>How to Upload OT Data</h4>
+    <p>Upload Excel files (.xlsx) to the <code>/data/</code> folder in your GitHub repo — 
+       via <a href="#" id="repo-link">GitHub web UI</a> drag &amp; drop or Google Sheets Apps Script push.<br/>
+       GitHub Actions auto-processes on every upload. Dashboard refreshes in ~2 minutes.</p>
+  </div>
+</div>
+
+<!-- KPI row -->
+<div class="kpi-row" id="kpi-row"></div>
+
+<!-- FORECAST VIEW -->
+<div id="view-forecast">
+  <div class="row3">
+    <div class="panel">
+      <div class="ph"><h3>🔴 Risk Forecast — This Week</h3><span class="ph-badge" id="fc-badge">—</span></div>
+      <div class="pb">
+        <div class="forecast-wrap">
+          <table class="forecast-tbl" id="fc-tbl">
+            <thead><tr>
+              <th>Employee</th><th>Dept</th><th>Line</th>
+              <th>Days Done</th><th>Current hrs</th><th>Projected</th>
+              <th>Max OT/day</th><th>Risk Now</th><th>Projected Risk</th>
+            </tr></thead>
+            <tbody id="fc-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="ph"><h3>⚠ Risk Distribution</h3></div>
+      <div class="pb" style="display:flex;flex-direction:column;gap:12px">
+        <div class="chart-wrap" style="max-height:220px"><canvas id="risk-doughnut"></canvas></div>
+        <div id="risk-pills-legend" style="display:flex;flex-direction:column;gap:6px"></div>
+      </div>
+    </div>
+  </div>
+  <div class="row2">
+    <div class="panel">
+      <div class="ph"><h3>📊 Line-wise OT Load</h3></div>
+      <div class="pb" id="fc-line-bars"></div>
+    </div>
+    <div class="panel">
+      <div class="ph"><h3>📊 Section-wise OT Load</h3></div>
+      <div class="pb" id="fc-sect-bars"></div>
+    </div>
+  </div>
+</div>
+
+<!-- DAILY VIEW -->
+<div id="view-daily" style="display:none">
+  <div class="row3">
+    <div class="panel">
+      <div class="ph"><h3>🏆 Top 10 OT Employees — Daily</h3><span class="ph-badge" id="d-date-badge">—</span></div>
+      <div class="pb" id="d-top10"></div>
+    </div>
+    <div class="panel">
+      <div class="ph"><h3>📈 Daily OT Trend (last 30 days)</h3></div>
+      <div class="pb"><div class="chart-wrap"><canvas id="daily-trend-chart"></canvas></div></div>
+    </div>
+  </div>
+  <div class="ftbl-wrap" id="daily-tbl-wrap">
+    <div class="ftbl-hd">
+      <h3>All Employees — Selected Day</h3>
+      <div id="daily-risk-pills" style="display:flex;gap:5px"></div>
+      <input class="srch" id="d-search" placeholder="🔍 Search…" oninput="filterDailyTable()"/>
+      <span id="d-emp-count"></span>
+    </div>
+    <div class="tbl-scroll"><table class="main-tbl" id="daily-tbl">
+      <thead><tr><th>ID</th><th>Name</th><th>Dept</th><th>Line</th><th>Section</th>
+        <th data-c="ot_hours">OT Hrs</th><th data-c="total_hours">Total Hrs</th></tr></thead>
+      <tbody id="daily-tbody"></tbody>
+    </table></div>
+  </div>
+</div>
+
+<!-- WEEKLY VIEW -->
+<div id="view-weekly" style="display:none">
+  <div class="row3">
+    <div class="panel">
+      <div class="ph"><h3>👥 Employee Status — Week</h3><span class="ph-badge" id="w-badge">—</span></div>
+      <div class="pb">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px" id="w-risk-filters"></div>
+        <div class="forecast-wrap">
+          <table class="forecast-tbl" id="w-emp-tbl">
+            <thead><tr><th>Employee</th><th>Line</th><th>Section</th>
+              <th>Days</th><th>Regular</th><th>OT</th><th>Total</th><th>Remaining</th><th>Projected</th><th>Status</th></tr></thead>
+            <tbody id="w-emp-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="panel" style="margin-bottom:16px">
+        <div class="ph"><h3>📊 By Line</h3></div>
+        <div class="pb" id="w-line-bars"></div>
+      </div>
+      <div class="panel">
+        <div class="ph"><h3>📊 By Section</h3></div>
+        <div class="pb" id="w-sect-bars"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MONTHLY VIEW -->
+<div id="view-monthly" style="display:none">
+  <div class="row2">
+    <div class="panel">
+      <div class="ph"><h3>📈 Daily OT Trend</h3><span class="ph-badge" id="m-badge">—</span></div>
+      <div class="pb"><div class="chart-wrap"><canvas id="monthly-chart"></canvas></div></div>
+    </div>
+    <div class="panel">
+      <div class="ph"><h3>🏆 Top 10 OT — Monthly</h3></div>
+      <div class="pb" id="m-top10"></div>
+    </div>
+  </div>
+  <div class="row2">
+    <div class="panel"><div class="ph"><h3>📊 By Line</h3></div><div class="pb" id="m-line-bars"></div></div>
+    <div class="panel"><div class="ph"><h3>📊 By Department</h3></div><div class="pb" id="m-dept-bars"></div></div>
+  </div>
+</div>
+
+<!-- QUARTERLY VIEW -->
+<div id="view-quarterly" style="display:none">
+  <div class="row2">
+    <div class="panel">
+      <div class="ph"><h3>📈 Monthly OT Trend</h3><span class="ph-badge" id="q-badge">—</span></div>
+      <div class="pb"><div class="chart-wrap"><canvas id="quarterly-chart"></canvas></div></div>
+    </div>
+    <div class="panel">
+      <div class="ph"><h3>🏆 Top 10 OT — Quarterly</h3></div>
+      <div class="pb" id="q-top10"></div>
+    </div>
+  </div>
+  <div class="panel" style="margin-bottom:20px">
+    <div class="ph"><h3>📊 Line-wise Average OT</h3></div>
+    <div class="pb" id="q-line-bars"></div>
+  </div>
+</div>
+
+<!-- YEARLY VIEW -->
+<div id="view-yearly" style="display:none">
+  <div class="row2">
+    <div class="panel">
+      <div class="ph"><h3>📈 Monthly OT Trend</h3><span class="ph-badge" id="y-badge">—</span></div>
+      <div class="pb"><div class="chart-wrap"><canvas id="yearly-month-chart"></canvas></div></div>
+    </div>
+    <div class="panel">
+      <div class="ph"><h3>📊 Quarterly Comparison</h3></div>
+      <div class="pb"><div class="chart-wrap"><canvas id="yearly-quarter-chart"></canvas></div></div>
+    </div>
+  </div>
+  <div class="row2">
+    <div class="panel"><div class="ph"><h3>🏆 Top 10 OT — Yearly</h3></div><div class="pb" id="y-top10"></div></div>
+    <div class="panel"><div class="ph"><h3>📊 Line Performance</h3></div><div class="pb" id="y-line-bars"></div></div>
+  </div>
+</div>
+
+</main>
+<footer>
+  OT Control Management &nbsp;·&nbsp; GitHub Pages + Python + Google Sheets &nbsp;·&nbsp;
+  <a id="footer-repo" href="#">View Repository ↗</a>
+</footer>
+
+<script>
+// ── GLOBALS ──────────────────────────────────────────────────
+let D=null, CUR_P='forecast';
+let chartInstances={};
+const PVIEWS=['forecast','daily','weekly','monthly','quarterly','yearly'];
+const RI={exceeded:'⛔',critical:'🔴',warning:'🟠',caution:'🟡',safe:'🟢'};
+const RC={exceeded:'var(--excd)',critical:'var(--crit)',warning:'var(--warn)',caution:'var(--caut)',safe:'var(--safe)'};
+const RO={exceeded:5,critical:4,warning:3,caution:2,safe:1};
+const CHART_COLORS={amber:'rgba(245,158,11,.9)',teal:'rgba(34,211,238,.9)',
+  red:'rgba(248,113,113,.9)',green:'rgba(52,211,153,.9)',purple:'rgba(232,121,249,.9)'};
+
+// ── LOAD ─────────────────────────────────────────────────────
+async function loadData(){
+  try{
+    const r=await fetch(`data/ot_data.json?t=${Date.now()}`);
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    D=await r.json();
+    init();
+  }catch(e){
+    document.getElementById('loading').innerHTML=
+      `<div class="ld-logo" style="color:var(--crit)">⚠ Error</div>
+       <div class="ld-sub">${e.message}</div>
+       <button class="btn-ref" style="margin-top:12px" onclick="loadData()">Retry</button>`;
+  }
+}
+
+function init(){
+  const s=D.summary||{};
+  document.getElementById('hs-limit').textContent=`${D.ot_limit||72}h`;
+  document.getElementById('hs-emp').textContent=s.total_employees||'—';
+  document.getElementById('hs-range').textContent=
+    s.data_from&&s.data_to?`${fmtDate(s.data_from)} – ${fmtDate(s.data_to)}`:'—';
+  document.getElementById('gen-ts').textContent=
+    `Updated ${new Date(D.generated_at).toLocaleString()}`;
+  setP('forecast');
+  document.getElementById('loading').style.display='none';
+}
+
+// ── PERIOD SWITCH ─────────────────────────────────────────────
+function setP(p){
+  CUR_P=p;
+  document.querySelectorAll('.ptab').forEach(b=>b.classList.toggle('active',b.dataset.p===p));
+  PVIEWS.forEach(v=>document.getElementById(`view-${v}`).style.display=v===p?'':'none');
+  populatePeriodSel(p);
+  renderView(p);
+}
+
+function populatePeriodSel(p){
+  const sel=document.getElementById('period-sel');
+  sel.innerHTML='';
+  let keys=[],label=k=>k;
+  if(p==='daily'){
+    keys=Object.keys(D.daily||{}).sort().reverse().slice(0,60);
+    label=k=>{const d=new Date(k+'T00:00:00');return `${d.toLocaleDateString('en-GB',{weekday:'short',day:'2-digit',month:'short',year:'numeric'})}`};
+  } else if(p==='weekly'){
+    keys=Object.keys(D.weekly||{}).sort().reverse();
+    label=k=>{const w=D.weekly[k];return `${fmtDate(w.week_start)} – ${fmtDate(w.week_end)}`};
+  } else if(p==='monthly'){
+    keys=Object.keys(D.monthly||{}).sort().reverse();
+    label=k=>D.monthly[k].label;
+  } else if(p==='quarterly'){
+    keys=Object.keys(D.quarterly||{}).sort().reverse();
+    label=k=>k;
+  } else if(p==='yearly'){
+    keys=Object.keys(D.yearly||{}).sort().reverse();
+  }
+  keys.forEach((k,i)=>{
+    const o=document.createElement('option');
+    o.value=k; o.textContent=label(k);
+    if(i===0) o.selected=true;
+    sel.appendChild(o);
+  });
+  if(p==='forecast') sel.innerHTML='<option>Current Week</option>';
+}
+
+function onPeriodSel(){ renderView(CUR_P); }
+
+function selKey(){return document.getElementById('period-sel').value||'';}
+
+// ── RENDER DISPATCHER ─────────────────────────────────────────
+function renderView(p){
+  const key=selKey();
+  if(p==='forecast') renderForecast();
+  else if(p==='daily')     renderDaily(key);
+  else if(p==='weekly')    renderWeekly(key);
+  else if(p==='monthly')   renderMonthly(key);
+  else if(p==='quarterly') renderQuarterly(key);
+  else if(p==='yearly')    renderYearly(key);
+}
+
+// ── KPI ROW ───────────────────────────────────────────────────
+function renderKPI(items){
+  document.getElementById('kpi-row').innerHTML=items.map(([cls,v,l,sub])=>`
+    <div class="kpi ${cls}">
+      <div class="kpi-v">${v}</div>
+      <div class="kpi-l">${l}</div>
+      <div class="kpi-sub">${sub}</div>
+    </div>`).join('');
+}
+
+// ─────────────────────────────────────────────────────────────
+// FORECAST
+// ─────────────────────────────────────────────────────────────
+function renderForecast(){
+  const fc=D.forecast||{};
+  const emps=fc.employees||[];
+  const lim=D.ot_limit||72;
+  const will=fc.will_exceed_count||0;
+  const crit=fc.critical_count||0;
+  const safe=emps.filter(e=>e.risk_projected==='safe').length;
+
+  renderKPI([
+    ['k-total',emps.length,'Total Employees',`Week ${fmtDate(fc.week_start)} – ${fmtDate(fc.week_end)}`],
+    ['k-exc',will,'Will Exceed 72h','Projected breach this week'],
+    ['k-risk',crit,'Critical / Exceeded','Immediate attention needed'],
+    ['k-ot',`${fc.days_elapsed||0}/6`,'Days Elapsed','Work days this week'],
+    ['k-avg',fc.days_remaining||0,'Days Remaining','Until week end'],
+    ['k-comp',`${emps.length?Math.round(safe/emps.length*100):100}%`,'Safe Employees','Below 48h projected'],
+  ]);
+
+  // Risk doughnut
+  const rc={exceeded:0,critical:0,warning:0,caution:0,safe:0};
+  emps.forEach(e=>rc[e.risk_projected]=(rc[e.risk_projected]||0)+1);
+  renderDoughnut('risk-doughnut',rc);
+
+  // Risk pills legend
+  document.getElementById('risk-pills-legend').innerHTML=
+    Object.entries(rc).map(([k,v])=>`
+      <div style="display:flex;justify-content:space-between;align-items:center;
+        background:var(--s2);border:1px solid var(--b2);border-radius:4px;padding:6px 10px">
+        <span class="rbadge ${k}">${RI[k]} ${cap(k)}</span>
+        <span style="font-family:var(--fm);font-size:16px;color:${RC[k]};font-weight:600">${v}</span>
+      </div>`).join('');
+
+  // Forecast table
+  document.getElementById('fc-badge').textContent=`${emps.length} employees`;
+  const tbody=document.getElementById('fc-tbody');
+  tbody.innerHTML=emps.map(e=>{
+    const pCls=e.projected_total>=72?'proj-over':e.projected_total>=60?'proj-warn':'proj-ok';
+    const pct=Math.min(100,e.current_total/lim*100).toFixed(0);
+    const rowCls=e.will_exceed?'alert-row':'';
+    return `<tr class="${rowCls}" onclick="openModal('${e.emp_id}','forecast')">
+      <td><div class="emp-n">${e.emp_name}</div><div class="emp-id">${e.emp_id}</div></td>
+      <td class="mono" style="font-size:11px">${e.department||'—'}</td>
+      <td class="mono" style="font-size:11px">${e.line||'—'}</td>
+      <td style="text-align:center;font-family:var(--fm)">${e.days_worked}/${6-e.days_remaining}</td>
+      <td>
+        <div class="mono num-big" style="color:${hCol(e.current_total)}">${e.current_total}h</div>
+        <div class="mp-bar" style="margin-top:3px;height:4px;background:var(--bg);border-radius:2px;overflow:hidden">
+          <div class="mp-fill" style="width:${pct}%;background:${hCol(e.current_total)};height:100%;border-radius:2px"></div>
+        </div>
+      </td>
+      <td><span class="${pCls}">${e.projected_total}h</span></td>
+      <td class="mono" style="font-size:11px;color:${e.max_daily_ot_allowed<=2?'var(--crit)':'var(--tdim)'}">${e.max_daily_ot_allowed}h/day</td>
+      <td><span class="rbadge ${e.risk_now}">${RI[e.risk_now]} ${cap(e.risk_now)}</span></td>
+      <td><span class="rbadge ${e.risk_projected}">${RI[e.risk_projected]} ${cap(e.risk_projected)}</span></td>
+    </tr>`;
+  }).join('');
+
+  // Get weekly data for group bars
+  const currWeekKey=fc.week_start;
+  const wk=D.weekly&&D.weekly[currWeekKey];
+  if(wk){
+    renderGroupBars('fc-line-bars', wk.by_line, lim, true);
+    renderGroupBars('fc-sect-bars', wk.by_section, lim, true);
+  } else {
+    // Build from forecast emps
+    const byLine={}, bySect={};
+    emps.forEach(e=>{
+      const l=e.line||'—'; if(!byLine[l]) byLine[l]={avg_hours:0,employees:0,risk_counts:{}};
+      byLine[l].avg_hours+=e.current_total; byLine[l].employees++;
+      byLine[l].risk_counts[e.risk_now]=(byLine[l].risk_counts[e.risk_now]||0)+1;
+    });
+    Object.values(byLine).forEach(g=>g.avg_hours=round2(g.avg_hours/g.employees));
+    renderGroupBars('fc-line-bars', byLine, lim, false);
+    renderGroupBars('fc-sect-bars', {}, lim, false);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// DAILY
+// ─────────────────────────────────────────────────────────────
+function renderDaily(key){
+  const all=D.daily||{};
+  const dd=key?all[key]:null;
+  if(!dd){
+    const keys=Object.keys(all).sort();
+    if(keys.length) { renderDaily(keys[keys.length-1]); return; }
+    renderKPI([['k-total','—','No Data','Upload Excel to /data/'],['k-ot','—','—','—'],['k-avg','—','—','—'],['k-risk','—','—','—'],['k-exc','—','—','—'],['k-comp','—','—','—']]);
+    return;
+  }
+  const d=new Date(key+'T00:00:00');
+  document.getElementById('d-date-badge').textContent=d.toLocaleDateString('en-GB',{weekday:'long',day:'2-digit',month:'long'});
+
+  renderKPI([
+    ['k-total',dd.employees,'Total Employees',key],
+    ['k-ot',dd.total_ot+'h','Total OT Today','All employees combined'],
+    ['k-avg',dd.avg_ot+'h','Avg OT per Employee','Daily average'],
+    ['k-risk',dd.top10?dd.top10.length:'—','Tracked','Top OT earners'],
+    ['k-exc','—','—','—'],
+    ['k-comp','—','—','—'],
+  ]);
+
+  // Top 10
+  renderTop10('d-top10', dd.top10||[], 12);
+
+  // Daily trend chart
+  const trendKeys=Object.keys(all).sort().slice(-30);
+  const trendData=trendKeys.map(k=>all[k].avg_ot||0);
+  const trendLabels=trendKeys.map(k=>{const dt=new Date(k+'T00:00:00');return `${dt.getDate()}/${dt.getMonth()+1}`;});
+  destroyChart('daily-trend-chart');
+  chartInstances['daily-trend-chart']=new Chart(document.getElementById('daily-trend-chart'),{
+    type:'line',
+    data:{labels:trendLabels,datasets:[{
+      label:'Avg OT (h)',data:trendData,
+      borderColor:CHART_COLORS.amber,backgroundColor:'rgba(245,158,11,.08)',
+      borderWidth:2,pointRadius:2,pointHoverRadius:5,fill:true,tension:.4
+    }]},
+    options:chartOpts('Avg OT Hours')
+  });
+
+  // Table
+  renderDailyTable(dd.all||[]);
+}
+
+function renderDailyTable(emps){
+  const q=document.getElementById('d-search').value.toLowerCase();
+  const filtered=emps.filter(e=>!q||e.emp_name.toLowerCase().includes(q)||e.emp_id.toLowerCase().includes(q));
+  document.getElementById('d-emp-count').textContent=`${filtered.length}/${emps.length}`;
+  document.getElementById('daily-tbody').innerHTML=filtered.map(e=>`
+    <tr onclick="openModal('${e.emp_id}','daily')">
+      <td class="emp-id">${e.emp_id}</td>
+      <td><span class="emp-n">${e.emp_name}</span></td>
+      <td style="color:var(--tdim);font-size:11px">${e.department||'—'}</td>
+      <td class="mono" style="font-size:11px">${e.line||'—'}</td>
+      <td class="mono" style="font-size:11px">${e.section||'—'}</td>
+      <td><span class="num-big" style="color:${e.ot_hours>=4?'var(--warn)':'var(--teal)'}">${e.ot_hours}h</span></td>
+      <td><span class="num-big" style="color:${hCol(e.total_hours)}">${e.total_hours}h</span></td>
+    </tr>`).join('');
+}
+function filterDailyTable(){renderDailyTable((D.daily||{})[selKey()]?.all||[]);}
+
+// ─────────────────────────────────────────────────────────────
+// WEEKLY
+// ─────────────────────────────────────────────────────────────
+let wRiskFilter='all';
+function renderWeekly(key){
+  const all=D.weekly||{};
+  const wk=key?all[key]:null;
+  if(!wk){
+    const keys=Object.keys(all).sort();
+    if(keys.length){renderWeekly(keys[keys.length-1]);return;}
+    return;
+  }
+  const rc=wk.risk_counts||{};
+  const at_risk=(rc.exceeded||0)+(rc.critical||0);
+  renderKPI([
+    ['k-total',wk.total_employees,'Employees',`Week ${fmtDate(wk.week_start)}`],
+    ['k-ot',wk.avg_hours+'h','Avg Weekly Hours','Per employee'],
+    ['k-risk',at_risk,'At Risk (Critical+)','Exceed or near limit'],
+    ['k-exc',rc.exceeded||0,'Exceeded 72h','Compliance breach'],
+    ['k-avg',rc.warning||0,'Warning Zone','60–68h'],
+    ['k-comp',rc.safe||0,'Safe','Under 48h'],
+  ]);
+
+  document.getElementById('w-badge').textContent=`${wk.total_employees} emp`;
+
+  // Risk filter pills
+  document.getElementById('w-risk-filters').innerHTML=
+    ['all','exceeded','critical','warning','caution','safe'].map(r=>`
+    <button class="flt-pill${wRiskFilter===r?' active':''}" onclick="setWRisk('${r}')">${r==='all'?'All':`${RI[r]} ${cap(r)}`}</button>`).join('');
+
+  renderWeeklyTable(wk);
+  renderGroupBars('w-line-bars', wk.by_line||{}, D.ot_limit, true);
+  renderGroupBars('w-sect-bars', wk.by_section||{}, D.ot_limit, true);
+}
+function setWRisk(r){wRiskFilter=r;renderWeekly(selKey());}
+
+function renderWeeklyTable(wk){
+  const emps=(wk.employees||[]).filter(e=>wRiskFilter==='all'||e.risk_level===wRiskFilter);
+  document.getElementById('w-emp-tbody').innerHTML=emps.map(e=>{
+    const pCls=e.projected_hours>=72?'proj-over':e.projected_hours>=60?'proj-warn':'proj-ok';
+    const remCol=e.remaining_hours<=8?'var(--crit)':'var(--tdim)';
+    return `<tr onclick="openModal('${e.emp_id}','weekly')">
+      <td><div class="emp-n">${e.emp_name}</div><div class="emp-id">${e.emp_id}</div></td>
+      <td class="mono" style="font-size:11px">${e.line||'—'}</td>
+      <td class="mono" style="font-size:11px">${e.section||'—'}</td>
+      <td style="text-align:center;font-family:var(--fm)">${e.days_worked}</td>
+      <td class="mono">${e.regular_hours}h</td>
+      <td class="mono" style="color:var(--amber)">${e.ot_hours}h</td>
+      <td><div class="num-big" style="color:${hCol(e.total_hours)}">${e.total_hours}h</div>
+          <div class="mp-bar" style="height:3px;margin-top:3px;background:var(--bg);border-radius:2px;overflow:hidden">
+          <div style="width:${Math.min(100,e.total_hours/(D.ot_limit||72)*100).toFixed(0)}%;height:100%;background:${hCol(e.total_hours)};border-radius:2px"></div></div></td>
+      <td class="mono" style="color:${remCol}">${e.remaining_hours}h</td>
+      <td><span class="${pCls}">${e.projected_hours}h</span></td>
+      <td><span class="rbadge ${e.risk_level}">${RI[e.risk_level]} ${cap(e.risk_level)}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+// ─────────────────────────────────────────────────────────────
+// MONTHLY
+// ─────────────────────────────────────────────────────────────
+function renderMonthly(key){
+  const all=D.monthly||{};
+  const mo=key?all[key]:null;
+  if(!mo){const keys=Object.keys(all).sort();if(keys.length){renderMonthly(keys[keys.length-1]);return;}return;}
+
+  renderKPI([
+    ['k-total',mo.total_employees,'Employees',mo.label],
+    ['k-ot',mo.total_ot+'h','Total OT Hours','This month'],
+    ['k-avg',mo.avg_ot+'h','Avg OT per Employee','Monthly avg'],
+    ['k-risk',mo.weeks?.reduce((s,w)=>s+w.exceeded,0)||0,'Exceeded Weeks','Week-level breaches'],
+    ['k-exc','—','—','—'],
+    ['k-comp','—','—','—'],
+  ]);
+
+  document.getElementById('m-badge').textContent=mo.label;
+
+  // Monthly daily OT chart
+  const tl=mo.daily_trend||[];
+  destroyChart('monthly-chart');
+  chartInstances['monthly-chart']=new Chart(document.getElementById('monthly-chart'),{
+    type:'bar',
+    data:{
+      labels:tl.map(t=>{const d=new Date(t.date+'T00:00:00');return `${d.getDate()}/${d.getMonth()+1}`;}),
+      datasets:[
+        {label:'Avg OT (h)',data:tl.map(t=>t.avg_ot),backgroundColor:'rgba(245,158,11,.7)',borderRadius:3,yAxisID:'y'},
+        {label:'Total OT (h)',data:tl.map(t=>t.total_ot),backgroundColor:'rgba(34,211,238,.15)',borderRadius:3,yAxisID:'y2',type:'line',borderColor:CHART_COLORS.teal,borderWidth:1.5,pointRadius:0,fill:false,tension:.4},
+      ]
+    },
+    options:{...chartOpts('OT Hours'),scales:{y:{...darkScale(),title:{display:true,text:'Avg OT/emp',color:'var(--tdim)'}},y2:{...darkScale(),position:'right',title:{display:true,text:'Total OT',color:'var(--tdim)'},grid:{display:false}}}}
+  });
+
+  renderTop10('m-top10', mo.top10||[], 14);
+  renderGroupBars('m-line-bars', mo.by_line||{}, D.ot_limit, false);
+  renderGroupBars('m-dept-bars', mo.by_department||{}, D.ot_limit, false);
+}
+
+// ─────────────────────────────────────────────────────────────
+// QUARTERLY
+// ─────────────────────────────────────────────────────────────
+function renderQuarterly(key){
+  const all=D.quarterly||{};
+  const qt=key?all[key]:null;
+  if(!qt){const keys=Object.keys(all).sort();if(keys.length){renderQuarterly(keys[keys.length-1]);return;}return;}
+
+  renderKPI([
+    ['k-total',qt.total_employees,'Employees',key],
+    ['k-ot',qt.total_ot+'h','Total OT Hours','Quarter total'],
+    ['k-avg',qt.avg_ot+'h','Avg OT per Employee','Quarter avg'],
+    ['k-risk','—','—','—'],['k-exc','—','—','—'],['k-comp','—','—','—'],
+  ]);
+  document.getElementById('q-badge').textContent=key;
+
+  const mt=qt.month_trend||[];
+  destroyChart('quarterly-chart');
+  chartInstances['quarterly-chart']=new Chart(document.getElementById('quarterly-chart'),{
+    type:'bar',
+    data:{
+      labels:mt.map(t=>{try{return new Date(t.month+'-01').toLocaleString('default',{month:'short'})}catch{return t.month;}}),
+      datasets:[
+        {label:'Avg OT/emp',data:mt.map(t=>t.avg_ot),backgroundColor:'rgba(245,158,11,.8)',borderRadius:4},
+        {label:'Total OT',data:mt.map(t=>t.total_ot),backgroundColor:'rgba(34,211,238,.2)',borderRadius:4,yAxisID:'y2',type:'line',borderColor:CHART_COLORS.teal,borderWidth:2,pointRadius:4,fill:false,tension:.3},
+      ]
+    },
+    options:{...chartOpts('OT Hours'),scales:{y:{...darkScale()},y2:{...darkScale(),position:'right',grid:{display:false}}}}
+  });
+
+  renderTop10('q-top10', qt.top10||[], 14);
+  renderGroupBars('q-line-bars', qt.by_line||{}, 300, false); // quarterly has higher totals
+}
+
+// ─────────────────────────────────────────────────────────────
+// YEARLY
+// ─────────────────────────────────────────────────────────────
+function renderYearly(key){
+  const all=D.yearly||{};
+  const yr=key?all[key]:null;
+  if(!yr){const keys=Object.keys(all).sort();if(keys.length){renderYearly(keys[keys.length-1]);return;}return;}
+
+  renderKPI([
+    ['k-total',yr.total_employees,'Employees',key],
+    ['k-ot',yr.total_ot+'h','Total OT Hours',key+' total'],
+    ['k-avg',yr.avg_ot+'h','Avg OT per Employee','Yearly avg'],
+    ['k-risk','—','—','—'],['k-exc','—','—','—'],['k-comp','—','—','—'],
+  ]);
+  document.getElementById('y-badge').textContent=key;
+
+  const mt=yr.month_trend||[];
+  destroyChart('yearly-month-chart');
+  chartInstances['yearly-month-chart']=new Chart(document.getElementById('yearly-month-chart'),{
+    type:'bar',
+    data:{
+      labels:mt.map(t=>t.label||t.month),
+      datasets:[
+        {label:'Avg OT/emp',data:mt.map(t=>t.avg_ot),backgroundColor:'rgba(245,158,11,.8)',borderRadius:4},
+        {label:'Total OT',data:mt.map(t=>t.total_ot),type:'line',borderColor:CHART_COLORS.teal,backgroundColor:'rgba(34,211,238,.08)',borderWidth:2,pointRadius:3,fill:true,tension:.4,yAxisID:'y2'},
+      ]
+    },
+    options:{...chartOpts('Monthly OT'),scales:{y:{...darkScale()},y2:{...darkScale(),position:'right',grid:{display:false}}}}
+  });
+
+  const qt=yr.quarterly_trend||[];
+  destroyChart('yearly-quarter-chart');
+  chartInstances['yearly-quarter-chart']=new Chart(document.getElementById('yearly-quarter-chart'),{
+    type:'bar',
+    data:{
+      labels:qt.map(t=>t.quarter),
+      datasets:[{label:'Avg OT/emp',data:qt.map(t=>t.avg_ot),backgroundColor:[CHART_COLORS.amber,CHART_COLORS.teal,CHART_COLORS.red,CHART_COLORS.green],borderRadius:6}]
+    },
+    options:chartOpts('Quarterly Avg OT')
+  });
+
+  renderTop10('y-top10', yr.top10||[], 14);
+  renderGroupBars('y-line-bars', yr.by_line||{}, 1000, false);
+}
+
+// ─────────────────────────────────────────────────────────────
+// COMPONENTS
+// ─────────────────────────────────────────────────────────────
+function renderTop10(elId, emps, maxH){
+  const el=document.getElementById(elId);
+  if(!emps.length){el.innerHTML='<div class="empty"><span class="ei">📭</span><h3>No data</h3></div>';return;}
+  const max=Math.max(...emps.map(e=>e.ot_hours),1);
+  el.innerHTML=emps.map((e,i)=>{
+    const rankCls=i===0?'gold':i===1?'silver':i===2?'bronze':'';
+    const pct=(e.ot_hours/max*100).toFixed(1);
+    const col=i<3?'var(--amber)':i<6?'var(--teal)':'var(--tdim)';
+    return `<div class="t10-item">
+      <div class="t10-rank ${rankCls}">${i<3?['🥇','🥈','🥉'][i]:i+1}</div>
+      <div class="t10-info">
+        <div class="t10-name">${e.emp_name}</div>
+        <div class="t10-sub">${e.emp_id} · ${e.line||'—'} · ${e.section||'—'}</div>
+        <div class="t10-bar-bg"><div class="t10-bar-fill" style="width:${pct}%;background:${col}"></div></div>
+      </div>
+      <div class="t10-val" style="color:${col}">${e.ot_hours}h</div>
+    </div>`;
+  }).join('');
+}
+
+function renderGroupBars(elId, data, refMax, showRisk){
+  const el=document.getElementById(elId);
+  if(!data||!Object.keys(data).length){el.innerHTML='<div class="empty" style="padding:16px"><span class="ei" style="font-size:24px">📭</span><h3 style="font-size:13px">No data</h3></div>';return;}
+  const items=Object.entries(data).sort((a,b)=>b[1].avg_hours-a[1].avg_hours);
+  const maxH=Math.max(...items.map(([,d])=>d.avg_hours),1);
+  el.innerHTML=items.map(([name,d])=>{
+    const pct=(d.avg_hours/maxH*100).toFixed(1);
+    const col=hCol(d.avg_hours);
+    const pills=showRisk&&d.risk_counts?Object.entries(d.risk_counts)
+      .filter(([,v])=>v>0).sort((a,b)=>RO[b[0]]-RO[a[0]])
+      .map(([k,v])=>`<span class="rpill ${k}">${RI[k]} ${v}</span>`).join(''):'';
+    return `<div class="grp-bar">
+      <div class="gb-top">
+        <span class="gb-name">${name}</span>
+        <span class="gb-val">${d.avg_hours}h avg · ${d.employees} emp</span>
+      </div>
+      <div class="gb-track"><div class="gb-fill" style="width:${pct}%;background:${col}"></div></div>
+      ${pills?`<div class="gb-pills">${pills}</div>`:''}
+    </div>`;
+  }).join('');
+}
+
+function renderDoughnut(canvasId, rc){
+  destroyChart(canvasId);
+  const labels=Object.keys(rc).filter(k=>rc[k]>0);
+  const vals=labels.map(k=>rc[k]);
+  const colors=labels.map(k=>RC[k]||'#888');
+  if(!vals.length) return;
+  chartInstances[canvasId]=new Chart(document.getElementById(canvasId),{
+    type:'doughnut',
+    data:{labels:labels.map(l=>`${RI[l]} ${cap(l)}`),datasets:[{data:vals,backgroundColor:colors,borderWidth:0,hoverOffset:6}]},
+    options:{responsive:true,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>`${ctx.label}: ${ctx.parsed}`}}}}
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
+// MODAL
+// ─────────────────────────────────────────────────────────────
+function openModal(empId, viewHint){
+  let emp=null;
+  // Try to find from forecast
+  if(D.forecast?.employees) emp=D.forecast.employees.find(e=>e.emp_id===empId);
+  // Try weekly
+  if(!emp){
+    const wKeys=Object.keys(D.weekly||{}).sort().reverse();
+    for(const k of wKeys){
+      emp=(D.weekly[k].employees||[]).find(e=>e.emp_id===empId);
+      if(emp) break;
+    }
+  }
+  if(!emp) return;
+
+  const lim=D.ot_limit||72;
+  const col=hCol(emp.current_total||emp.total_hours||0);
+  const tot=emp.current_total||emp.total_hours||0;
+  const proj=emp.projected_total||emp.projected_hours||0;
+  const ot=emp.current_ot||emp.ot_hours||0;
+  const reg=tot-ot;
+  const risk=emp.risk_projected||emp.risk_level||'safe';
+
+  document.getElementById('m-name').textContent=emp.emp_name;
+  document.getElementById('m-name').style.color=col;
+  document.getElementById('m-meta').textContent=
+    `${emp.emp_id}  ·  ${emp.department||''}  ·  ${emp.line||''}  ·  ${emp.section||''}`;
+
+  // Daily breakdown from weekly data
+  const wKeys=Object.keys(D.weekly||{}).sort().reverse();
+  let daily={};
+  for(const k of wKeys){
+    const found=(D.weekly[k].employees||[]).find(e=>e.emp_id===empId);
+    if(found?.daily){daily=found.daily;break;}
+  }
+  const wFc=D.forecast||{};
+  const wsDate=wFc.week_start||wKeys[0];
+  const DNAMES=['MON','TUE','WED','THU','FRI','SAT','SUN'];
+  let wsObj;
+  try{wsObj=new Date(wsDate+'T00:00:00');}catch{wsObj=new Date();}
+  const dayCards=Array.from({length:7},(_,i)=>{
+    const d=new Date(wsObj);d.setDate(d.getDate()+i);
+    const key=d.toISOString().split('T')[0];
+    const dd=daily[key];
+    if(!dd||dd.total===0)
+      return `<div class="day-c absent"><div class="day-n">${DNAMES[i]}</div><div class="day-d">${key}</div><div class="day-t">—</div><div class="day-b">rest</div></div>`;
+    const cls=dd.ot>=5?'high-ot':dd.ot>0?'has-ot':'';
+    return `<div class="day-c ${cls}"><div class="day-n">${DNAMES[i]}</div><div class="day-d">${key}</div><div class="day-t">${dd.total}h</div><div class="day-b">${dd.regular}h + ${dd.ot}h OT</div></div>`;
+  }).join('');
+
+  const pct=Math.min(100,tot/lim*100).toFixed(1);
+  const pCls=proj>=72?'proj-over':proj>=60?'proj-warn':'proj-ok';
+
+  document.getElementById('m-body').innerHTML=`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div>
+        <div style="font-family:var(--fh);font-size:60px;font-weight:800;color:${col};line-height:1;letter-spacing:-2px">${tot}h</div>
+        <div style="font-family:var(--fm);font-size:11px;color:var(--tdim);margin-top:4px">${emp.days_worked||'?'} days worked · ${emp.remaining_allowed||emp.remaining_hours||0}h remaining</div>
+      </div>
+      <span class="rbadge ${risk}" style="font-size:12px;padding:5px 12px">${RI[risk]} ${cap(risk)}</span>
+    </div>
+    <div class="m-prog"><div class="m-prog-fill" style="width:${pct}%;background:${col}"></div></div>
+    <div class="m-ticks"><span>0h</span><span>48h</span><span>60h</span><span>68h</span><span>${lim}h ← limit</span></div>
+    <div style="font-family:var(--fh);font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--tdim);margin-bottom:9px">Daily Breakdown (Current Week)</div>
+    <div class="daily-grid">${dayCards}</div>
+    <div class="m-stat-row">
+      <div class="m-stat"><div class="ml">Regular</div><div class="mv" style="color:var(--teal)">${reg}h</div></div>
+      <div class="m-stat"><div class="ml">Overtime</div><div class="mv" style="color:var(--amber)">${ot}h</div></div>
+      <div class="m-stat"><div class="ml">Projected</div><div class="mv"><span class="${pCls}">${proj}h</span></div></div>
+    </div>
+    ${emp.max_daily_ot_allowed!==undefined?`<div style="background:var(--s3);border:1px solid var(--b2);border-radius:var(--r);padding:12px 16px;display:flex;justify-content:space-between;align-items:center">
+      <span style="font-family:var(--fh);font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--tdim)">Max Allowed OT per Remaining Day</span>
+      <span style="font-family:var(--fm);font-size:18px;font-weight:600;color:${emp.max_daily_ot_allowed<=2?'var(--crit)':'var(--safe)'}">${emp.max_daily_ot_allowed}h</span>
+    </div>`:''}`;
+  document.getElementById('overlay').classList.add('open');
+}
+function closeModal(){document.getElementById('overlay').classList.remove('open');}
+document.getElementById('overlay').addEventListener('click',e=>{if(e.target===document.getElementById('overlay'))closeModal();});
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal();});
+
+// ─────────────────────────────────────────────────────────────
+// CHART HELPERS
+// ─────────────────────────────────────────────────────────────
+function destroyChart(id){if(chartInstances[id]){chartInstances[id].destroy();delete chartInstances[id];}}
+function darkScale(){return{ticks:{color:'var(--tdim)',font:{size:10}},grid:{color:'rgba(255,255,255,.04)'},border:{color:'rgba(255,255,255,.06)'}};}
+function chartOpts(title){
+  return{responsive:true,maintainAspectRatio:true,
+    plugins:{legend:{labels:{color:'var(--tdim)',font:{size:10},boxWidth:12}},
+      tooltip:{backgroundColor:'rgba(10,12,18,.95)',titleColor:'var(--amber)',bodyColor:'var(--text)',borderColor:'var(--b2)',borderWidth:1,padding:10,cornerRadius:6}},
+    scales:{x:{...darkScale()},y:{...darkScale(),beginAtZero:true}}};
+}
+
+// ─────────────────────────────────────────────────────────────
+// UTILITIES
+// ─────────────────────────────────────────────────────────────
+function hCol(h){
+  if(h>=72) return 'var(--excd)';if(h>=68) return 'var(--crit)';
+  if(h>=60) return 'var(--warn)';if(h>=48) return 'var(--caut)';
+  return 'var(--safe)';
+}
+function cap(s){return s?s[0].toUpperCase()+s.slice(1):s;}
+function round2(n){return Math.round(n*100)/100;}
+function fmtDate(s){if(!s) return '—';try{const d=new Date(s+'T00:00:00');return d.toLocaleDateString('en-GB',{day:'2-digit',month:'short'});}catch{return s;}}
+
+// ─────────────────────────────────────────────────────────────
+loadData();
+</script>
+</body>
+</html>
