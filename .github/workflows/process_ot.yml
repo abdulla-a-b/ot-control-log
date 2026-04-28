@@ -1,9 +1,9 @@
-name: ⏱ Process OT Data & Deploy Dashboard
+name: ⏱ Process OT Data & Deploy
 
 on:
   push:
     branches: [main]
-    paths: ['data/**', 'scripts/process_ot.py']
+    paths: ['data/**', 'scripts/**']
   workflow_dispatch:
 
 permissions:
@@ -17,12 +17,12 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: '3.11'}
       - run: pip install pandas openpyxl
-      - name: Process OT data
+      - name: Process attendance data
         run: python scripts/process_ot.py
       - name: Commit JSON
         run: |
           git config user.email "actions@github.com"
           git config user.name  "GitHub Actions"
           git add docs/data/ot_data.json
-          git diff --staged --quiet || git commit -m "🤖 OT data update [$(date -u '+%Y-%m-%d %H:%M UTC')]"
+          git diff --staged --quiet || git commit -m "🤖 Update OT data [$(date -u '+%Y-%m-%d %H:%M UTC')]"
           git push
